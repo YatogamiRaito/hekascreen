@@ -1,0 +1,6 @@
+# Use mold as the linker for Linux builds.
+# mold is a fast parallel linker — dramatically reduces link time for large
+# Rust projects like this one (Bevy + FFmpeg).
+# Install: sudo apt install mold
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
