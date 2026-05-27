@@ -1,5 +1,5 @@
 use bevy::{prelude::*, window::{WindowLevel, PrimaryWindow}};
-use bevy_ineffable::prelude::IneffableCommands;
+use bevy_enhanced_input::prelude::RebuildBindings;
 use rust_i18n::t;
 
 use crate::{
@@ -67,7 +67,7 @@ pub fn handle_mask_command(
     mut window_query: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut next_mapping_state: ResMut<NextState<MappingState>>,
     mut next_cursor_state: ResMut<NextState<CursorState>>,
-    mut ineffable: IneffableCommands,
+    mut commands: Commands,
     mut active_mapping: ResMut<ActiveMappingConfig>,
     mut mask_size: ResMut<MaskSize>,
     mut pending_resize: Local<Option<PendingResize>>,
@@ -240,10 +240,10 @@ pub fn handle_mask_command(
                     file_name
                 );
                 match load_mapping_config(&file_name) {
-                    Ok((mapping_config, input_config)) => {
-                        ineffable.set_config(&input_config);
+                    Ok(mapping_config) => {
                         active_mapping.0 = Some(mapping_config);
                         active_mapping.1 = file_name;
+                        commands.trigger(RebuildBindings);
                         oneshot_tx.send(Ok(String::new())).unwrap();
                     }
                     Err(e) => {

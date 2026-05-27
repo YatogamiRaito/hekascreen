@@ -1,9 +1,11 @@
+pub mod auto_repeat;
 pub mod binding;
 pub mod cast_spell;
 pub mod config;
 pub mod cursor;
 pub mod direction_pad;
 pub mod fire;
+pub mod input_actions;
 pub mod observation;
 pub mod raw_input;
 pub mod script;
@@ -11,22 +13,22 @@ pub mod script_helper;
 pub mod swipe;
 pub mod tap;
 pub mod utils;
-pub mod auto_repeat;
 
 use bevy::prelude::*;
-use bevy_ineffable::prelude::*;
+use bevy_enhanced_input::prelude::*;
 use rust_i18n::t;
 
 use crate::{
     config::LocalConfig,
     mask::mapping::{
         config::{
-            ActiveMappingConfig, BindMappingConfig, MappingAction, default_mapping_config,
+            ActiveMappingConfig, BindMappingConfig, default_mapping_config,
             load_mapping_config, save_mapping_config,
         },
         cursor::{CursorPlugins, CursorState},
+        input_actions::MappingContext,
     },
-    utils::{relate_to_data_path},
+    utils::relate_to_data_path,
 };
 
 #[derive(States, Clone, Copy, Default, Eq, PartialEq, Hash, Debug)]
@@ -41,10 +43,11 @@ pub struct MappingPlugins;
 
 impl Plugin for MappingPlugins {
     fn build(&self, app: &mut App) {
-        app.add_plugins((IneffablePlugin, CursorPlugins))
+        app.add_plugins((EnhancedInputPlugin, CursorPlugins))
             .insert_state(MappingState::Stop)
             .insert_resource(ActiveMappingConfig(None, String::new()))
-            .register_input_action::<MappingAction>()
+            .add_input_context::<MappingContext>()
+            .add_observer(input_actions::setup_bindings)
             .add_systems(
                 Startup,
                 (
@@ -115,18 +118,18 @@ fn clear_repeats_system() {
     script_helper::clear_all_repeats();
 }
 
-fn init(mut ineffable: IneffableCommands, mut active_mapping: ResMut<ActiveMappingConfig>) {
+fn init(mut commands: Commands, mut active_mapping: ResMut<ActiveMappingConfig>) {
     let config = LocalConfig::get();
 
-    let (bind_mapping_config, input_config, file) =
+    let (bind_mapping_config, file) =
         match load_mapping_config(&config.active_mapping_file) {
-            Ok((mapping_config, input_config)) => {
+            Ok(mapping_config) => {
                 log::info!(
                     "[Mask] {}: {}",
                     t!("mask.mapping.usingMappingConfig"),
                     config.active_mapping_file,
                 );
-                (mapping_config, input_config, config.active_mapping_file)
+                (mapping_config, config.active_mapping_file)
             }
             Err(e) => {
                 log::error!("{}", e);
@@ -139,15 +142,12 @@ fn init(mut ineffable: IneffableCommands, mut active_mapping: ResMut<ActiveMappi
                 save_mapping_config(&default_mapping, &config_path).unwrap();
                 LocalConfig::set_active_mapping_file("default.json".to_string());
                 let default_bind_mapping: BindMappingConfig = default_mapping.into();
-                let input_config: InputConfig = InputConfig::from(&default_bind_mapping);
-                (
-                    default_bind_mapping,
-                    input_config,
-                    "default.json".to_string(),
-                )
+                (default_bind_mapping, "default.json".to_string())
             }
         };
     active_mapping.0 = Some(bind_mapping_config);
     active_mapping.1 = file;
-    ineffable.set_config(&input_config);
+    // Spawn the Actions entity — the Binding<MappingContext> observer will
+    // read ActiveMappingConfig and set up all input bindings.
+    commands.spawn(Actions::<MappingContext>::default());
 }

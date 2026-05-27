@@ -6,11 +6,11 @@ use std::{
 use bevy::{
     ecs::{
         resource::Resource,
-        system::{Commands, Res, ResMut},
+        system::{Commands, Query, Res, ResMut},
     },
     math::Vec2,
 };
-use bevy_ineffable::prelude::{Ineffable, InputBinding};
+use bevy_enhanced_input::prelude::Actions;
 use bevy_tokio_tasks::TokioTasksRuntime;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
@@ -19,6 +19,7 @@ use crate::{
     mask::mapping::{
         binding::{DirectionBinding, ValidateMappingConfig},
         config::ActiveMappingConfig,
+        input_actions::MappingContext,
         utils::{ControlMsgHelper, MIN_MOVE_STEP_INTERVAL, Position, ease_sigmoid_like},
     },
     scrcpy::constant::MotionEventAction,
@@ -39,7 +40,6 @@ pub struct BindMappingDirectionPad {
     pub max_offset_x: f32,
     pub max_offset_y: f32,
     pub bind: DirectionBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingDirectionPad> for BindMappingDirectionPad {
@@ -51,8 +51,7 @@ impl From<MappingDirectionPad> for BindMappingDirectionPad {
             initial_duration: value.initial_duration,
             max_offset_x: value.max_offset_x,
             max_offset_y: value.max_offset_y,
-            bind: value.bind.clone(),
-            input_binding: value.bind.into(),
+            bind: value.bind,
         }
     }
 }
@@ -115,7 +114,7 @@ fn scale_direction_2d_state(d_state: Vec2, mapping: &BindMappingDirectionPad) ->
 pub struct BlockDirectionPad(pub bool);
 
 pub fn handle_direction_pad(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     runtime: ResMut<TokioTasksRuntime>,
@@ -126,6 +125,10 @@ pub fn handle_direction_pad(
         return;
     }
 
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
+
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("DirectionPad") {
@@ -133,7 +136,7 @@ pub fn handle_direction_pad(
                 let key = action.to_string();
                 let original_size: Vec2 = active_mapping.original_size.into();
                 let state = scale_direction_2d_state(
-                    ineffable.direction_2d(action.ineff_dual_axis()),
+                    action.direction_2d(actions),
                     mapping,
                 );
                 if direction_pad_map.0.contains_key(&key) {

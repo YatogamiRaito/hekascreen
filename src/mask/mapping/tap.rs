@@ -3,12 +3,12 @@ use std::{collections::HashMap, time::Duration};
 use bevy::{
     ecs::{
         resource::Resource,
-        system::{Commands, Res, ResMut},
+        system::{Commands, Query, Res, ResMut},
     },
     math::Vec2,
     time::{Time, Timer, TimerMode},
 };
-use bevy_ineffable::prelude::{ContinuousBinding, Ineffable, InputBinding, PulseBinding};
+use bevy_enhanced_input::prelude::Actions;
 use bevy_tokio_tasks::TokioTasksRuntime;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
@@ -18,6 +18,7 @@ use crate::{
         mapping::{
             binding::{ButtonBinding, ValidateMappingConfig},
             config::ActiveMappingConfig,
+            input_actions::MappingContext,
             utils::{ControlMsgHelper, Position},
         },
         mask_command::MaskSize,
@@ -38,7 +39,6 @@ pub struct BindMappingSingleTap {
     pub duration: u64,
     pub sync: bool,
     pub bind: ButtonBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingSingleTap> for BindMappingSingleTap {
@@ -49,8 +49,7 @@ impl From<MappingSingleTap> for BindMappingSingleTap {
             pointer_id: value.pointer_id,
             duration: value.duration,
             sync: value.sync,
-            bind: value.bind.clone(),
-            input_binding: ContinuousBinding::hold(value.bind).0,
+            bind: value.bind,
         }
     }
 }
@@ -68,17 +67,20 @@ pub struct MappingSingleTap {
 impl ValidateMappingConfig for MappingSingleTap {}
 
 pub fn handle_single_tap(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     runtime: ResMut<TokioTasksRuntime>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("SingleTap") {
                 let original_size: Vec2 = active_mapping.original_size.into();
                 let mapping = mapping.as_ref_singletap();
-                if ineffable.just_activated(action.ineff_continuous()) {
+                if action.just_activated(actions) {
                     if mapping.sync {
                         // Tap down sync
                         ControlMsgHelper::send_touch(
@@ -113,7 +115,7 @@ pub fn handle_single_tap(
                             );
                         });
                     }
-                } else if mapping.sync && ineffable.just_deactivated(action.ineff_continuous()) {
+                } else if mapping.sync && action.just_deactivated(actions) {
                     // Tap up sync
                     ControlMsgHelper::send_touch(
                         &cs_tx_res.0,
@@ -136,7 +138,6 @@ pub struct BindMappingRepeatTap {
     pub duration: u64,
     pub interval: u32,
     pub bind: ButtonBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingRepeatTap> for BindMappingRepeatTap {
@@ -147,8 +148,7 @@ impl From<MappingRepeatTap> for BindMappingRepeatTap {
             pointer_id: value.pointer_id,
             duration: value.duration,
             interval: value.interval,
-            bind: value.bind.clone(),
-            input_binding: ContinuousBinding::hold(value.bind).0,
+            bind: value.bind,
         }
     }
 }
@@ -213,15 +213,18 @@ pub fn handle_repeat_tap_trigger(
 }
 
 pub fn handle_repeat_tap(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     mut active_map: ResMut<ActiveRepeatTapMap>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("RepeatTap") {
                 let mapping = mapping.as_ref_repeattap();
-                if ineffable.just_activated(action.ineff_continuous()) {
+                if action.just_activated(actions) {
                     let interval = Duration::from_millis(mapping.interval as u64);
                     let original_size: Vec2 = active_mapping.original_size.into();
                     let mut timer = Timer::new(interval, TimerMode::Repeating);
@@ -236,7 +239,7 @@ pub fn handle_repeat_tap(
                             duration: Duration::from_millis(mapping.duration as u64),
                         },
                     );
-                } else if ineffable.just_deactivated(action.ineff_continuous()) {
+                } else if action.just_deactivated(actions) {
                     active_map.0.remove(action.as_ref());
                 }
             }
@@ -257,7 +260,6 @@ pub struct BindMappingMultipleTap {
     pub pointer_id: u64,
     pub items: Vec<MappingMultipleTapItem>,
     pub bind: ButtonBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingMultipleTap> for BindMappingMultipleTap {
@@ -266,8 +268,7 @@ impl From<MappingMultipleTap> for BindMappingMultipleTap {
             note: value.note,
             pointer_id: value.pointer_id,
             items: value.items,
-            bind: value.bind.clone(),
-            input_binding: PulseBinding::just_pressed(value.bind).0,
+            bind: value.bind,
         }
     }
 }
@@ -290,17 +291,20 @@ impl ValidateMappingConfig for MappingMultipleTap {
 }
 
 pub fn handle_multiple_tap(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     mask_size: Res<MaskSize>,
     runtime: ResMut<TokioTasksRuntime>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("MultipleTap") {
                 let mapping = mapping.as_ref_multipletap();
-                if ineffable.just_pulsed(action.ineff_pulse()) {
+                if action.just_pulsed(actions) {
                     let cs_tx = cs_tx_res.0.clone();
                     let original_size = mask_size.0;
                     let pointer_id = mapping.pointer_id;

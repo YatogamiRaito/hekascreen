@@ -3,11 +3,11 @@ use std::time::{Duration, Instant};
 use bevy::{
     ecs::{
         resource::Resource,
-        system::{Commands, Res, ResMut},
+        system::{Commands, Query, Res, ResMut},
     },
     math::Vec2,
 };
-use bevy_ineffable::prelude::{ContinuousBinding, Ineffable, InputBinding, PulseBinding};
+use bevy_enhanced_input::prelude::Actions;
 use bevy_tokio_tasks::TokioTasksRuntime;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
@@ -19,6 +19,7 @@ use crate::{
             config::{ActiveMappingConfig, MappingAction},
             cursor::CursorPosition,
             direction_pad::{BlockDirectionPad, DirectionPadMap},
+            input_actions::MappingContext,
             utils::{ControlMsgHelper, MIN_MOVE_STEP_LENGTH, Position},
         },
         mask_command::MaskSize,
@@ -144,7 +145,6 @@ pub struct BindMappingMouseCastSpell {
     pub release_mode: MouseCastReleaseMode,
     pub cast_no_direction: bool,
     pub bind: ButtonBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingMouseCastSpell> for BindMappingMouseCastSpell {
@@ -161,7 +161,6 @@ impl From<MappingMouseCastSpell> for BindMappingMouseCastSpell {
             release_mode: value.release_mode,
             cast_no_direction: value.cast_no_direction,
             bind: value.bind.clone(),
-            input_binding: ContinuousBinding::hold(value.bind).0,
         }
     }
 }
@@ -261,7 +260,7 @@ pub fn handle_mouse_cast_spell_trigger(
 }
 
 pub fn handle_mouse_cast_spell(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     mask_size: Res<MaskSize>,
@@ -270,11 +269,14 @@ pub fn handle_mouse_cast_spell(
     mut active_cast: ResMut<ActiveCastSpell>,
     mut block_direction_pad: ResMut<BlockDirectionPad>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("MouseCastSpell") {
                 let mapping = mapping.as_ref_mousecastspell();
-                if ineffable.just_activated(action.ineff_continuous()) {
+                if action.just_activated(actions) {
                     let cur_cursor_pos = cursor_pos.0;
                     let cur_mask_size = mask_size.0;
 
@@ -419,7 +421,7 @@ pub fn handle_mouse_cast_spell(
                             );
                         }
                     });
-                } else if ineffable.just_deactivated(action.ineff_continuous()) {
+                } else if action.just_deactivated(actions) {
                     if let MouseCastReleaseMode::OnRelease = mapping.release_mode {
                         let Some(cast) = &active_cast.0 else {
                             continue;
@@ -465,9 +467,7 @@ pub struct BindMappingPadCastSpell {
     pub block_direction_pad: bool,
     pub pad_action: MappingAction,
     pub pad_bind: DirectionBinding,
-    pub pad_input_binding: InputBinding,
     pub bind: ButtonBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingPadCastSpell> for BindMappingPadCastSpell {
@@ -481,9 +481,7 @@ impl From<MappingPadCastSpell> for BindMappingPadCastSpell {
             block_direction_pad: value.block_direction_pad,
             pad_action: MappingAction::PadCastDirection1, // temp value
             pad_bind: value.pad_bind.clone(),
-            pad_input_binding: value.pad_bind.into(),
             bind: value.bind.clone(),
-            input_binding: ContinuousBinding::hold(value.bind).0,
         }
     }
 }
@@ -516,17 +514,20 @@ fn scale_direction_2d_state(d_state: Vec2, drag_radius: f32) -> Vec2 {
 }
 
 pub fn handle_pad_cast_spell_trigger(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     cs_tx_res: Res<ChannelSenderCS>,
     mut active_cast: ResMut<ActiveCastSpell>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_cast) = active_cast.0.as_mut() {
         if active_cast.mouse_flag || active_cast.enable_instant > Instant::now() {
             return;
         }
 
         let state = scale_direction_2d_state(
-            ineffable.direction_2d(active_cast.pad_action.as_ref().unwrap().ineff_dual_axis()),
+            active_cast.pad_action.as_ref().unwrap().direction_2d(actions),
             active_cast.drag_radius,
         );
 
@@ -546,7 +547,7 @@ pub fn handle_pad_cast_spell_trigger(
 }
 
 pub fn handle_pad_cast_spell(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     mask_size: Res<MaskSize>,
@@ -554,11 +555,14 @@ pub fn handle_pad_cast_spell(
     mut direction_pad_map: ResMut<DirectionPadMap>,
     mut block_direction_pad: ResMut<BlockDirectionPad>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("PadCastSpell") {
                 let mapping = mapping.as_ref_padcastspell();
-                if ineffable.just_activated(action.ineff_continuous()) {
+                if action.just_activated(actions) {
                     // clear and touch up existing active cast
                     // for OnSecondPress cast, we do the same thing
                     if let Some(cast) = active_cast.0.take() {
@@ -634,7 +638,7 @@ pub fn handle_pad_cast_spell(
                         );
                         delta += Vec2::new(1., -1.);
                     }
-                } else if ineffable.just_deactivated(action.ineff_continuous()) {
+                } else if action.just_deactivated(actions) {
                     if let PadCastReleaseMode::OnRelease = mapping.release_mode {
                         let Some(cast) = &active_cast.0 else {
                             continue;
@@ -668,7 +672,6 @@ pub struct BindMappingCancelCast {
     pub note: String,
     pub position: Position,
     pub bind: ButtonBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingCancelCast> for BindMappingCancelCast {
@@ -677,7 +680,6 @@ impl From<MappingCancelCast> for BindMappingCancelCast {
             position: value.position,
             note: value.note,
             bind: value.bind.clone(),
-            input_binding: PulseBinding::just_pressed(value.bind).0,
         }
     }
 }
@@ -692,18 +694,21 @@ pub struct MappingCancelCast {
 impl ValidateMappingConfig for MappingCancelCast {}
 
 pub fn handle_cancel_cast(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     mask_size: Res<MaskSize>,
     runtime: ResMut<TokioTasksRuntime>,
     mut active_cast: ResMut<ActiveCastSpell>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("CancelCast") {
                 let mapping = mapping.as_ref_cancelcast();
-                if ineffable.just_pulsed(action.ineff_pulse()) {
+                if action.just_pulsed(actions) {
                     // clear
                     if let Some(cast) = active_cast.0.take() {
                         let original_size: Vec2 = active_mapping.original_size.into();

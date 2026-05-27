@@ -1,11 +1,12 @@
-use bevy::ecs::system::Res;
-use bevy_ineffable::prelude::{Ineffable, PulseBinding};
+use bevy::ecs::system::{Query, Res};
+use bevy_enhanced_input::prelude::Actions;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     mask::mapping::{
         binding::{ButtonBinding, ValidateMappingConfig},
         config::ActiveMappingConfig,
+        input_actions::MappingContext,
         utils::Position,
     },
     utils::ChannelSenderCS,
@@ -18,7 +19,6 @@ pub struct BindMappingAutoRepeat {
     pub target_key: String,
     pub interval: u32,
     pub bind: ButtonBinding,
-    pub input_binding: bevy_ineffable::prelude::InputBinding,
 }
 
 impl From<MappingAutoRepeat> for BindMappingAutoRepeat {
@@ -29,7 +29,6 @@ impl From<MappingAutoRepeat> for BindMappingAutoRepeat {
             target_key: value.target_key,
             interval: value.interval,
             bind: value.bind.clone(),
-            input_binding: PulseBinding::just_pressed(value.bind).0,
         }
     }
 }
@@ -52,22 +51,28 @@ impl ValidateMappingConfig for MappingAutoRepeat {
             return Err("Interval must be a positive integer".to_string());
         }
         // Verify keyname parses correctly
-        let _keycode = serde_json::from_str::<crate::scrcpy::constant::Keycode>(&format!("\"{}\"", self.target_key))
-            .map_err(|_| format!("Invalid target key name '{}'", self.target_key))?;
+        let _keycode = serde_json::from_str::<crate::scrcpy::constant::Keycode>(&format!(
+            "\"{}\"",
+            self.target_key
+        ))
+        .map_err(|_| format!("Invalid target key name '{}'", self.target_key))?;
         Ok(())
     }
 }
 
 pub fn handle_auto_repeat(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("AutoRepeat") {
                 let mapping = mapping.as_ref_autorepeat();
-                if ineffable.just_pulsed(action.ineff_pulse()) {
+                if action.just_pulsed(actions) {
                     let target = &mapping.target_key;
                     if crate::mask::mapping::script_helper::is_repeating(target) {
                         crate::mask::mapping::script_helper::stop_repeat(target);

@@ -5,10 +5,6 @@ use bevy::input::{
     keyboard::{KeyCode, NativeKeyCode},
     mouse::MouseButton,
 };
-use bevy_ineffable::{
-    bindings::{AnalogInput, BinaryInput, ChordLike, Threshold},
-    prelude::{DualAxisBinding, InputBinding, SingleAxisBinding},
-};
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
@@ -39,21 +35,6 @@ impl From<GamepadButton> for MergedButton {
     }
 }
 
-impl From<MergedButton> for BinaryInput {
-    fn from(input: MergedButton) -> Self {
-        match input {
-            MergedButton::ScrollDown => {
-                BinaryInput::Axis(AnalogInput::ScrollWheelY, Threshold::new(-0.1))
-            }
-            MergedButton::ScrollUp => {
-                BinaryInput::Axis(AnalogInput::ScrollWheelY, Threshold::new(0.1))
-            }
-            MergedButton::Mouse(mouse_button) => BinaryInput::MouseButton(mouse_button),
-            MergedButton::Keyboard(key_code) => BinaryInput::Key(key_code),
-            MergedButton::GamePad(gamepad_button) => BinaryInput::Gamepad(gamepad_button),
-        }
-    }
-}
 
 macro_rules! match_gamepad_to_string {
     ($button:expr; $($variant:ident),* $(,)?) => {
@@ -278,7 +259,7 @@ impl<'de> Deserialize<'de> for MergedButton {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ButtonBinding(Vec<MergedButton>);
+pub struct ButtonBinding(pub Vec<MergedButton>);
 
 impl ButtonBinding {
     pub fn new(buttons: Vec<MergedButton>) -> Self {
@@ -296,20 +277,6 @@ impl ToString for ButtonBinding {
     }
 }
 
-impl From<ButtonBinding> for Vec<BinaryInput> {
-    fn from(value: ButtonBinding) -> Self {
-        value.0.into_iter().map(|input| input.into()).collect()
-    }
-}
-
-impl From<ButtonBinding> for ChordLike {
-    fn from(value: ButtonBinding) -> Self {
-        match value.0.len() {
-            0 => ChordLike::Single(value.0[0].clone().into()),
-            _ => ChordLike::Multiple(value.0.iter().map(|input| input.clone().into()).collect()),
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
@@ -326,49 +293,6 @@ pub enum DirectionBinding {
     },
 }
 
-impl From<DirectionBinding> for InputBinding {
-    fn from(value: DirectionBinding) -> Self {
-        match value {
-            DirectionBinding::Button {
-                up,
-                down,
-                left,
-                right,
-            } => {
-                DualAxisBinding::builder()
-                    .set_x(
-                        SingleAxisBinding::hold()
-                            .set_negative(left)
-                            .set_positive(right)
-                            .build(),
-                    )
-                    .set_y(
-                        SingleAxisBinding::hold()
-                            .set_negative(up)
-                            .set_positive(down)
-                            .build(),
-                    )
-                    .build()
-                    .0
-            }
-            DirectionBinding::JoyStick { x, y } => {
-                DualAxisBinding::builder()
-                    .set_x(
-                        SingleAxisBinding::analog(AnalogInput::GamePad(x))
-                            .set_sensitivity(1.0)
-                            .build(),
-                    )
-                    .set_y(
-                        SingleAxisBinding::analog(AnalogInput::GamePad(y))
-                            .set_sensitivity(1.0)
-                            .build(),
-                    )
-                    .build()
-                    .0
-            }
-        }
-    }
-}
 
 impl DirectionBinding {
     fn _gamepad_axis_name(axis: &GamepadAxis) -> String {

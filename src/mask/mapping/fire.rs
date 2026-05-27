@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use bevy::{
     ecs::{
         resource::Resource,
-        system::{Commands, Res, ResMut},
+        system::{Commands, Query, Res, ResMut},
     },
     input::mouse::AccumulatedMouseMotion,
     math::Vec2,
     state::state::{NextState, State},
 };
-use bevy_ineffable::prelude::{ContinuousBinding, Ineffable, InputBinding, PulseBinding};
+use bevy_enhanced_input::prelude::Actions;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +19,7 @@ use crate::{
             binding::{ButtonBinding, ValidateMappingConfig},
             config::ActiveMappingConfig,
             cursor::{ActiveCursorFpsConfig, CursorPosition, CursorState, FPS_MARGIN},
+            input_actions::MappingContext,
             utils::{ControlMsgHelper, Position},
         },
         mask_command::MaskSize,
@@ -39,7 +40,6 @@ pub struct BindMappingFps {
     pub sensitivity_x: f32,
     pub sensitivity_y: f32,
     pub bind: ButtonBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingFps> for BindMappingFps {
@@ -50,8 +50,7 @@ impl From<MappingFps> for BindMappingFps {
             position: value.position,
             sensitivity_x: value.sensitivity_x,
             sensitivity_y: value.sensitivity_y,
-            bind: value.bind.clone(),
-            input_binding: PulseBinding::just_pressed(value.bind).0,
+            bind: value.bind,
         }
     }
 }
@@ -82,7 +81,7 @@ impl ValidateMappingConfig for MappingFps {
 }
 
 pub fn handle_fps(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     mut fps_config: ResMut<ActiveCursorFpsConfig>,
@@ -91,10 +90,13 @@ pub fn handle_fps(
     cursor_pos: Res<CursorPosition>,
     mask_size: Res<MaskSize>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("Fps") {
-                if ineffable.just_pulsed(action.ineff_pulse()) {
+                if action.just_pulsed(actions) {
                     let original_size: Vec2 = active_mapping.original_size.into();
                     match state.get() {
                         CursorState::Normal => {
@@ -145,7 +147,6 @@ pub struct BindMappingFire {
     pub sensitivity_x: f32,
     pub sensitivity_y: f32,
     pub bind: ButtonBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingFire> for BindMappingFire {
@@ -156,8 +157,7 @@ impl From<MappingFire> for BindMappingFire {
             position: value.position,
             sensitivity_x: value.sensitivity_x,
             sensitivity_y: value.sensitivity_y,
-            bind: value.bind.clone(),
-            input_binding: ContinuousBinding::hold(value.bind).0,
+            bind: value.bind,
         }
     }
 }
@@ -208,7 +208,7 @@ struct FireItem {
 }
 
 pub fn handle_fire(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     mut fps_config: ResMut<ActiveCursorFpsConfig>,
@@ -216,11 +216,14 @@ pub fn handle_fire(
     mut cursor_pos: ResMut<CursorPosition>,
     mask_size: Res<MaskSize>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("Fire") {
                 let mapping = mapping.as_ref_fire();
-                if ineffable.just_activated(action.ineff_continuous()) {
+                if action.just_activated(actions) {
                     // stop fps motion
                     fps_config.ignore_fps_motion = true;
                     // touch up fps
@@ -253,7 +256,7 @@ pub fn handle_fire(
                             sensitivity,
                         },
                     );
-                } else if ineffable.just_deactivated(action.ineff_continuous()) {
+                } else if action.just_deactivated(actions) {
                     if let Some(fire_item) = active_map.0.remove(action.as_ref()) {
                         // touch up fire
                         ControlMsgHelper::send_touch(

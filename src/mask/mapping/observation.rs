@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use bevy::{
     ecs::{
         resource::Resource,
-        system::{Commands, Res, ResMut},
+        system::{Commands, Query, Res, ResMut},
     },
     math::Vec2,
 };
-use bevy_ineffable::prelude::{ContinuousBinding, Ineffable, InputBinding};
+use bevy_enhanced_input::prelude::Actions;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -16,6 +16,7 @@ use crate::{
             binding::{ButtonBinding, ValidateMappingConfig},
             config::ActiveMappingConfig,
             cursor::CursorPosition,
+            input_actions::MappingContext,
             utils::{ControlMsgHelper, Position},
         },
         mask_command::MaskSize,
@@ -36,7 +37,6 @@ pub struct BindMappingObservation {
     pub sensitivity_x: f32,
     pub sensitivity_y: f32,
     pub bind: ButtonBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingObservation> for BindMappingObservation {
@@ -47,8 +47,7 @@ impl From<MappingObservation> for BindMappingObservation {
             position: value.position,
             sensitivity_x: value.sensitivity_x,
             sensitivity_y: value.sensitivity_y,
-            bind: value.bind.clone(),
-            input_binding: ContinuousBinding::hold(value.bind).0,
+            bind: value.bind,
         }
     }
 }
@@ -94,18 +93,21 @@ pub fn handle_observation_trigger(
 }
 
 pub fn handle_observation(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     mask_size: Res<MaskSize>,
     cursor_pos: Res<CursorPosition>,
     mut active_map: ResMut<ActiveObservation>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("Observation") {
                 let mapping = mapping.as_ref_observation();
-                if ineffable.just_activated(action.ineff_continuous()) {
+                if action.just_activated(actions) {
                     let original_size: Vec2 = active_mapping.original_size.into();
                     let original_pos: Vec2 = mapping.position.into();
                     let sensitivity: Vec2 = (mapping.sensitivity_x, mapping.sensitivity_y).into();
@@ -129,7 +131,7 @@ pub fn handle_observation(
                             sensitivity,
                         },
                     );
-                } else if ineffable.just_deactivated(action.ineff_continuous()) {
+                } else if action.just_deactivated(actions) {
                     if let Some(item) = active_map.0.remove(action.as_ref()) {
                         // touch up
                         let delta = (cursor_pos.0 - item.start_cursor_pos) * item.sensitivity;

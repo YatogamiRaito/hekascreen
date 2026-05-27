@@ -7,11 +7,6 @@ use std::{
 };
 
 use bevy::{ecs::resource::Resource, math::Vec2};
-use bevy_ineffable::{
-    config::InputConfig,
-    phantom::IAWrp,
-    prelude::{InputAction, InputBinding},
-};
 use paste::paste;
 use rust_i18n::t;
 use seq_macro::seq;
@@ -42,83 +37,27 @@ use crate::{
     utils::{is_safe_file_name, relate_to_data_path},
 };
 
-// declare 32 actions for each kind of key mapping
+// declare 32 action slots for each mapping type
 seq!(N in 1..=32 {
-    #[derive(InputAction, Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, AsRefStr, Display, EnumString)]
+    #[derive(Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, AsRefStr, Display, EnumString)]
     pub enum MappingAction {
         #(
-            #[ineffable(continuous)]
             SingleTap~N,
-            #[ineffable(continuous)]
             RepeatTap~N,
-            #[ineffable(pulse)]
             MultipleTap~N,
-            #[ineffable(pulse)]
             Swipe~N,
-            #[ineffable(dual_axis)]
             DirectionPad~N,
-            #[ineffable(continuous)]
             MouseCastSpell~N,
-            #[ineffable(continuous)]
             PadCastSpell~N,
-            #[ineffable(dual_axis)]
             PadCastDirection~N,
-            #[ineffable(pulse)]
             CancelCast~N,
-            #[ineffable(continuous)]
             Observation~N,
-            #[ineffable(pulse)]
             Fps~N,
-            #[ineffable(continuous)]
             Fire~N,
-            #[ineffable(pulse)]
             RawInput~N,
-            #[ineffable(continuous)]
             Script~N,
-            #[ineffable(pulse)]
             AutoRepeat~N,
         )*
-    }
-
-    impl MappingAction {
-        pub fn ineff_continuous(&self) -> IAWrp<MappingAction, bevy_ineffable::phantom::Continuous> {
-            match self {
-                #(
-                    MappingAction::SingleTap~N => self.clone()._singletap~N(),
-                    MappingAction::RepeatTap~N => self.clone()._repeattap~N(),
-                    MappingAction::MouseCastSpell~N => self.clone()._mousecastspell~N(),
-                    MappingAction::PadCastSpell~N => self.clone()._padcastspell~N(),
-                    MappingAction::Observation~N => self.clone()._observation~N(),
-                    MappingAction::Fire~N => self.clone()._fire~N(),
-                    MappingAction::Script~N => self.clone()._script~N(),
-                )*
-                _ => panic!("ineff_continuous called on non-continuous variant"),
-            }
-        }
-
-        pub fn ineff_pulse(&self) -> IAWrp<MappingAction, bevy_ineffable::phantom::Pulse> {
-            match self {
-                #(
-                    MappingAction::MultipleTap~N => self.clone()._multipletap~N(),
-                    MappingAction::Swipe~N => self.clone()._swipe~N(),
-                    MappingAction::CancelCast~N => self.clone()._cancelcast~N(),
-                    MappingAction::Fps~N => self.clone()._fps~N(),
-                    MappingAction::RawInput~N => self.clone()._rawinput~N(),
-                    MappingAction::AutoRepeat~N => self.clone()._autorepeat~N(),
-                )*
-                _ => panic!("ineff_pulse called on non-pulse variant"),
-            }
-        }
-
-        pub fn ineff_dual_axis(&self) -> IAWrp<MappingAction, bevy_ineffable::phantom::DualAxis> {
-            match self {
-                #(
-                    MappingAction::DirectionPad~N => self.clone()._directionpad~N(),
-                    MappingAction::PadCastDirection~N => self.clone()._padcastdirection~N(),
-                )*
-                _ => panic!("ineff_dual_axis called on non-dual_axis variant"),
-            }
-        }
     }
 });
 
@@ -163,14 +102,6 @@ macro_rules! impl_mapping_related {
         }
 
         impl BindMappingType {
-            pub fn get_input_binding(&self) -> InputBinding {
-                match self {
-                    $(
-                        BindMappingType::$variant(inner) => inner.input_binding.clone(),
-                    )*
-                }
-            }
-
             $(
                 paste! {
                     pub fn [<as_ref_ $variant:lower>](&self) -> & [<BindMapping $variant>] {
@@ -277,27 +208,6 @@ impl BindMappingConfig {
     }
 }
 
-impl From<&BindMappingConfig> for InputConfig {
-    fn from(mapping_config: &BindMappingConfig) -> Self {
-        let mut all_bindings: HashMap<String, Vec<InputBinding>> = HashMap::new();
-
-        for (action, mapping) in &mapping_config.mappings {
-            if let BindMappingType::PadCastSpell(m) = mapping {
-                all_bindings.insert(action.to_string(), vec![m.input_binding.clone()]);
-                all_bindings.insert(m.pad_action.to_string(), vec![m.pad_input_binding.clone()]);
-            } else {
-                all_bindings.insert(action.to_string(), vec![mapping.get_input_binding()]);
-            }
-        }
-
-        let binding_config: HashMap<String, HashMap<String, Vec<InputBinding>>> =
-            HashMap::from([("MappingAction".to_string(), all_bindings)]);
-        let mut input_config = InputConfig::new();
-        input_config.bindings = binding_config;
-        input_config
-    }
-}
-
 #[derive(Resource, Debug, Clone, Default)]
 pub struct ActiveMappingConfig(pub Option<BindMappingConfig>, pub String);
 
@@ -354,9 +264,7 @@ pub fn validate_mapping_config(mapping_config: &MappingConfig) -> Result<(), Str
     Ok(())
 }
 
-pub fn load_mapping_config(
-    file_name: impl AsRef<str>,
-) -> Result<(BindMappingConfig, InputConfig), String> {
+pub fn load_mapping_config(file_name: impl AsRef<str>) -> Result<BindMappingConfig, String> {
     if !is_safe_file_name(file_name.as_ref()) {
         return Err(format!(
             "{}: {}",
@@ -383,8 +291,7 @@ pub fn load_mapping_config(
     validate_mapping_config(&mapping_config)?;
 
     let bind_mapping_config: BindMappingConfig = mapping_config.into();
-    let input_config: InputConfig = InputConfig::from(&bind_mapping_config);
-    Ok((bind_mapping_config, input_config))
+    Ok(bind_mapping_config)
 }
 
 pub fn save_mapping_config(config: &MappingConfig, path: &Path) -> Result<(), String> {

@@ -3,12 +3,12 @@ use std::{collections::HashMap, time::Duration};
 use bevy::{
     ecs::{
         resource::Resource,
-        system::{Commands, Res, ResMut},
+        system::{Commands, Query, Res, ResMut},
     },
     math::Vec2,
     time::{Time, Timer, TimerMode},
 };
-use bevy_ineffable::prelude::{ContinuousBinding, Ineffable, InputBinding};
+use bevy_enhanced_input::prelude::Actions;
 use bevy_tokio_tasks::TokioTasksRuntime;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,7 @@ use crate::{
         binding::{ButtonBinding, ValidateMappingConfig},
         config::ActiveMappingConfig,
         cursor::CursorPosition,
+        input_actions::MappingContext,
         script_helper::ScriptAST,
         utils::Position,
     }, mask_command::MaskSize},
@@ -41,7 +42,6 @@ pub struct BindMappingScript {
     pub held_script_ast: ScriptAST,
     pub interval: u64,
     pub bind: ButtonBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingScript> for BindMappingScript {
@@ -83,8 +83,7 @@ impl From<MappingScript> for BindMappingScript {
             released_script: value.released_script,
             held_script: value.held_script,
             interval: value.interval,
-            bind: value.bind.clone(),
-            input_binding: ContinuousBinding::hold(value.bind).0,
+            bind: value.bind,
         }
     }
 }
@@ -126,7 +125,7 @@ impl ValidateMappingConfig for MappingScript {
 }
 
 pub fn handle_script(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     v_tx_res: Res<ChannelSenderV>,
@@ -135,6 +134,9 @@ pub fn handle_script(
     runtime: ResMut<TokioTasksRuntime>,
     mut active_map: ResMut<ActiveScriptMap>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("Script") {
@@ -146,7 +148,7 @@ pub fn handle_script(
                 let mask_size = mask_size_res.0;
                 let interval = Duration::from_millis(mapping.interval as u64);
 
-                if ineffable.just_activated(action.ineff_continuous()) {
+                if action.just_activated(actions) {
                     let _ = v_tx.send(VideoMsg::ScriptClearError);
                     if let Some(ref err) = mapping.pressed_script_ast.parse_error {
                         let _ = v_tx.send(VideoMsg::ScriptError { error: err.clone() });
@@ -187,7 +189,7 @@ pub fn handle_script(
                             },
                         );
                     }
-                } else if ineffable.just_deactivated(action.ineff_continuous()) {
+                } else if action.just_deactivated(actions) {
                     if !mapping.held_script_ast.empty {
                         active_map.0.remove(action.as_ref());
                     }

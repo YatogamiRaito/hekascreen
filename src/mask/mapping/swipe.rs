@@ -1,10 +1,10 @@
 use std::time::Duration;
 
 use bevy::{
-    ecs::system::{Res, ResMut},
+    ecs::system::{Query, Res, ResMut},
     math::Vec2,
 };
-use bevy_ineffable::prelude::*;
+use bevy_enhanced_input::prelude::Actions;
 use bevy_tokio_tasks::TokioTasksRuntime;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
@@ -13,6 +13,7 @@ use crate::{
     mask::mapping::{
         binding::{ButtonBinding, ValidateMappingConfig},
         config::ActiveMappingConfig,
+        input_actions::MappingContext,
         utils::{ControlMsgHelper, MIN_MOVE_STEP_INTERVAL, Position, ease_sigmoid_like},
     },
     scrcpy::constant::MotionEventAction,
@@ -26,7 +27,6 @@ pub struct BindMappingSwipe {
     pub positions: Vec<Position>,
     pub interval: u64,
     pub bind: ButtonBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingSwipe> for BindMappingSwipe {
@@ -36,8 +36,7 @@ impl From<MappingSwipe> for BindMappingSwipe {
             pointer_id: value.pointer_id,
             positions: value.positions,
             interval: value.interval,
-            bind: value.bind.clone(),
-            input_binding: PulseBinding::just_pressed(value.bind).0,
+            bind: value.bind,
         }
     }
 }
@@ -61,17 +60,20 @@ impl ValidateMappingConfig for MappingSwipe {
 }
 
 pub fn handle_swipe(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     runtime: ResMut<TokioTasksRuntime>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("Swipe") {
                 let mapping = mapping.as_ref_swipe();
                 let original_size: Vec2 = active_mapping.original_size.into();
-                if ineffable.just_pulsed(action.ineff_pulse()) {
+                if action.just_pulsed(actions) {
                     let cs_tx = cs_tx_res.0.clone();
                     let pointer_id = mapping.pointer_id;
                     let points = mapping.positions.clone();

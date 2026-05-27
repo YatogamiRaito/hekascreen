@@ -4,7 +4,7 @@ use bevy::{
     ecs::{
         event::EventReader,
         resource::Resource,
-        system::{Commands, Res, ResMut},
+        system::{Commands, Query, Res, ResMut},
     },
     input::{
         ButtonInput, ButtonState,
@@ -14,7 +14,7 @@ use bevy::{
     platform::collections::HashMap,
     state::state::NextState,
 };
-use bevy_ineffable::prelude::{Ineffable, InputBinding, PulseBinding};
+use bevy_enhanced_input::prelude::Actions;
 use copypasta::{ClipboardContext, ClipboardProvider};
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,7 @@ use crate::{
         MappingState,
         binding::{ButtonBinding, ValidateMappingConfig},
         config::ActiveMappingConfig,
+        input_actions::MappingContext,
         utils::{ControlMsgHelper, Position},
     },
     scrcpy::constant,
@@ -40,7 +41,6 @@ pub struct BindMappingRawInput {
     pub note: String,
     pub position: Position,
     pub bind: ButtonBinding,
-    pub input_binding: InputBinding,
 }
 
 impl From<MappingRawInput> for BindMappingRawInput {
@@ -49,7 +49,6 @@ impl From<MappingRawInput> for BindMappingRawInput {
             note: value.note,
             position: value.position,
             bind: value.bind.clone(),
-            input_binding: PulseBinding::just_released(value.bind).0, // use release to trigger
         }
     }
 }
@@ -64,14 +63,17 @@ pub struct MappingRawInput {
 impl ValidateMappingConfig for MappingRawInput {}
 
 pub fn handle_raw_input(
-    ineffable: Res<Ineffable>,
+    actions_q: Query<&Actions<MappingContext>>,
     active_mapping: Res<ActiveMappingConfig>,
     mut next_state: ResMut<NextState<MappingState>>,
 ) {
+    let Ok(actions) = actions_q.single() else {
+        return;
+    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, _) in &active_mapping.mappings {
             if action.as_ref().starts_with("RawInput") {
-                if ineffable.just_pulsed(action.ineff_pulse()) {
+                if action.just_pulsed(actions) {
                     next_state.set(MappingState::RawInput);
                     log::info!("[Mapping] {}", t!("mask.mapping.rawInputModeHint"));
                     return;
