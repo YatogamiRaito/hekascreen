@@ -257,6 +257,14 @@
         "result": "Running result"
       },
       "name": "Script"
+    },
+    "autoRepeat": {
+      "setting": {
+        "title": "Mapping Configuration - AutoRepeat",
+        "target_key": "Target Key (e.g. 5)",
+        "interval": "Interval (ms)"
+      },
+      "name": "AutoRepeat"
     }
   },
   "settings": {

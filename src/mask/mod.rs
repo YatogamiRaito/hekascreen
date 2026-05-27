@@ -3,11 +3,7 @@ pub mod mask_command;
 pub mod ui;
 pub mod video;
 
-use bevy::{
-    app::{App, Plugin, Startup, Update},
-    ecs::system::{Commands, Single},
-    window::Window,
-};
+use bevy::prelude::*;
 
 use crate::mask::{
     mask_command::{MaskSize, handle_mask_command},
@@ -21,7 +17,14 @@ impl Plugin for MaskPlugins {
         app.add_plugins((ui::UiPlugins, mapping::MappingPlugins))
             .init_non_send_resource::<VideoAttributes>()
             .add_systems(Startup, (init_mask_size, init_video))
-            .add_systems(Update, (handle_mask_command, handle_video_msg, update_diagnostics_hud));
+            .add_systems(
+                Update,
+                (
+                    handle_mask_command,
+                    handle_video_msg.after(handle_mask_command),
+                    update_diagnostics_hud.after(handle_video_msg),
+                ),
+            );
     }
 }
 

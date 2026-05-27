@@ -3,20 +3,24 @@ NEWLINE    = _{ "\r\n" | "\n" | "\r" }
 COMMENT    = _{ "//" ~ (!LINE_END ~ ANY)* }
 LINE_END   = _{ NEWLINE | EOI }
 
-program  = { SOI ~ stmt* ~ EOI }
+program  = { SOI ~ (stmt | fn_def)* ~ EOI }
 stmt_end = { ";" }
 
-stmt = { (let_stmt | assign_stmt | if_stmt | while_stmt | expr_stmt) ~ stmt_end }
+stmt = { (let_stmt | assign_stmt | if_stmt | while_stmt | return_stmt | expr_stmt) ~ stmt_end }
 
 let_stmt    = { "let" ~ ident ~ "=" ~ expr }
 assign_stmt = { ident ~ "=" ~ expr }
 expr_stmt   = { expr }
+return_stmt = { "return" ~ expr? }
 
 if_stmt     = { "if" ~ expr ~ block ~ else_clause? }
 else_clause = _{ "else" ~ (if_stmt | block) }
-block       = { "{" ~ stmt* ~ "}" }
+block       = { "{" ~ (stmt | fn_def)* ~ "}" }
 
 while_stmt = { "while" ~ expr ~ block }
+
+fn_def     = { "fn" ~ ident ~ "(" ~ param_list? ~ ")" ~ block }
+param_list = { ident ~ ("," ~ ident)* }
 
 expr = _{ logic_or }
 

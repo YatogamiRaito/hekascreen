@@ -11,6 +11,7 @@ pub mod script_helper;
 pub mod swipe;
 pub mod tap;
 pub mod utils;
+pub mod auto_repeat;
 
 use bevy::prelude::*;
 use bevy_ineffable::prelude::*;
@@ -82,6 +83,7 @@ impl Plugin for MappingPlugins {
                         .run_if(in_state(CursorState::Fps)),
                     script::handle_script,
                     script::handle_script_trigger,
+                    auto_repeat::handle_auto_repeat,
                 )
                     .run_if(in_state(MappingState::Normal)),
             )
@@ -101,8 +103,16 @@ impl Plugin for MappingPlugins {
             .add_systems(
                 OnExit(MappingState::RawInput),
                 raw_input::on_exit_raw_input_mode,
+            )
+            .add_systems(
+                OnExit(MappingState::Normal),
+                clear_repeats_system,
             );
     }
+}
+
+fn clear_repeats_system() {
+    script_helper::clear_all_repeats();
 }
 
 fn init(mut ineffable: IneffableCommands, mut active_mapping: ResMut<ActiveMappingConfig>) {

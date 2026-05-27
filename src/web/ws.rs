@@ -12,9 +12,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{self, error::RecvError};
 
 use crate::{
-    scrcpy::{ScrcpyDevice, constant, control_msg::ScrcpyControlMsg},
+    scrcpy::{ScrcpyDevice, constant, control_msg::ScrcpyControlMsg, controller::ControllerCommand},
     utils::share::ControlledDevice,
 };
+use tokio::sync::mpsc::UnboundedSender;
 use futures_util::{
     SinkExt,
     stream::{SplitSink, SplitStream, StreamExt},
@@ -148,25 +149,28 @@ impl From<WebSocketMsg> for ScrcpyControlMsg {
 pub struct AppStateWS {
     cs_tx: broadcast::Sender<ScrcpyControlMsg>,
     ws_tx: broadcast::Sender<WebSocketNotification>,
+    d_tx: UnboundedSender<ControllerCommand>,
 }
 
 pub fn routers(
     cs_tx: broadcast::Sender<ScrcpyControlMsg>,
     ws_tx: broadcast::Sender<WebSocketNotification>,
+    d_tx: UnboundedSender<ControllerCommand>,
 ) -> Router {
     Router::new()
         .route("/connect", any(ws_handler))
-        .with_state(AppStateWS { cs_tx, ws_tx })
+        .with_state(AppStateWS { cs_tx, ws_tx, d_tx })
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppStateWS>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state.cs_tx, state.ws_tx.subscribe()))
+    ws.on_upgrade(move |socket| handle_socket(socket, state.cs_tx, state.ws_tx.subscribe(), state.d_tx))
 }
 
 async fn handle_socket(
     socket: WebSocket,
     cs_tx: broadcast::Sender<ScrcpyControlMsg>,
     ws_rx: broadcast::Receiver<WebSocketNotification>,
+    d_tx: UnboundedSender<ControllerCommand>,
 ) {
     log::info!("[WebSocket] {}", t!("web.ws.connected"));
     let (sender, receiver) = socket.split();
@@ -188,6 +192,21 @@ async fn handle_socket(
         }
     }
     log::info!("[WebSocket] {}", t!("web.ws.disconnected"));
+
+    // Cleanup: shut down all controlled streaming sessions since WebSocket disconnected
+    let device_list = ControlledDevice::get_device_list().await;
+    for device in device_list {
+        let scid = device.scid.clone();
+        let cmd = if device.main {
+            ControllerCommand::ShutdownMain(scid)
+        } else {
+            ControllerCommand::ShutdownSub(scid)
+        };
+        if let Err(e) = d_tx.send(cmd) {
+            log::error!("[WebSocket] Failed to send shutdown command to controller: {}", e);
+        }
+        ControlledDevice::remove_device(&device.scid).await;
+    }
 }
 
 async fn handle_send(
@@ -235,6 +254,10 @@ async fn handle_recv(
     while let Some(Ok(msg)) = receiver.next().await {
         match msg {
             Message::Text(t) => {
+                if t.len() > 1_048_576 {
+                    log::warn!("[WebSocket] Received text message exceeding 1MB limit: {} bytes", t.len());
+                    continue;
+                }
                 let msg: WebSocketMsg = match serde_json::from_str(&t) {
                     Ok(m) => m,
                     Err(e) => {

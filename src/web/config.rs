@@ -113,6 +113,11 @@ async fn update_config(
         }
         "web_port" => {
             if let Some(value) = payload.value.as_u64() {
+                if value < 1 || value > 65535 {
+                    return Err(WebServerError::bad_request(
+                        "Web port must be between 1 and 65535".to_string()
+                    ));
+                }
                 LocalConfig::set_web_port(value as u16);
                 return Ok(JsonResponse::success(
                     format!("{}: {}", t!("web.config.restartToApplyWebPort"), value),
@@ -150,6 +155,11 @@ async fn update_config(
         }
         "controller_port" => {
             if let Some(value) = payload.value.as_u64() {
+                if value < 1 || value > 65535 {
+                    return Err(WebServerError::bad_request(
+                        "Controller port must be between 1 and 65535".to_string()
+                    ));
+                }
                 LocalConfig::set_controller_port(value as u16);
                 return Ok(JsonResponse::success(
                     format!(
@@ -341,6 +351,11 @@ async fn update_config(
         }
         "video_bit_rate" => {
             if let Some(value) = payload.value.as_u64() {
+                if value == 0 || value > u32::MAX as u64 {
+                    return Err(WebServerError::bad_request(
+                        format!("Video bit rate must be between 1 and {}", u32::MAX)
+                    ));
+                }
                 LocalConfig::set_video_bit_rate(value as u32);
                 return Ok(JsonResponse::success(
                     format!("{}: {}", t!("web.config.setVideoBitRateSuccess"), value),
@@ -353,6 +368,11 @@ async fn update_config(
         }
         "video_max_size" => {
             if let Some(value) = payload.value.as_u64() {
+                if value == 0 || value > u32::MAX as u64 {
+                    return Err(WebServerError::bad_request(
+                        format!("Video max size must be between 1 and {}", u32::MAX)
+                    ));
+                }
                 LocalConfig::set_video_max_size(value as u32);
                 return Ok(JsonResponse::success(
                     format!("{}: {}", t!("web.config.setVideoMaxSizeSuccess"), value),
@@ -365,6 +385,11 @@ async fn update_config(
         }
         "video_max_fps" => {
             if let Some(value) = payload.value.as_u64() {
+                if value == 0 || value > u32::MAX as u64 {
+                    return Err(WebServerError::bad_request(
+                        format!("Video max FPS must be between 1 and {}", u32::MAX)
+                    ));
+                }
                 LocalConfig::set_video_max_fps(value as u32);
                 return Ok(JsonResponse::success(
                     format!("{}: {}", t!("web.config.setVideoMaxFpsSuccess"), value),

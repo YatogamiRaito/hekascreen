@@ -292,6 +292,7 @@ impl ScrcpyConnection {
         m_tx: crossbeam_channel::Sender<(MaskCommand, oneshot::Sender<Result<String, String>>)>,
         scid: &str,
         recycle_rx: crossbeam_channel::Receiver<Vec<u8>>,
+        recycle_tx: crossbeam_channel::Sender<Vec<u8>>,
     ) {
         // read metadata
         let mut buf: [u8; 12] = [0; 12];
@@ -346,7 +347,13 @@ impl ScrcpyConnection {
                         return;
                     }
                 };
-                let video_decoder = VideoDecoder::new(codec_id, width, height);
+                let video_decoder = match VideoDecoder::new(codec_id, width, height) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        log::error!("[Controller] Failed to initialize video decoder: {}", e);
+                        return;
+                    }
+                };
 
                 // Send stream-info once so the HUD can show ground-truth status
                 // (hw_active reflects whether VAAPI actually initialized, not just
@@ -383,6 +390,10 @@ impl ScrcpyConnection {
 
                     // no send config packet
                     if packet.pts().is_some() {
+                    let packet_arrival_us = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_micros() as u64;
                         let decode_start = std::time::Instant::now();
                         if let Err(e) = video_decoder.decoder.send_packet(&mut packet) {
                             log::warn!("[Controller] Failed to send packet to decoder: {} (frame_count={})", e, frame_count);
@@ -424,35 +435,63 @@ impl ScrcpyConnection {
                             }
                         }
 
-                        let rgb_frame = video_decoder.conver_to_rgba(&decoded);
+                        let frame_size = video_decoder.frame_size;
+                        let decoder_width = video_decoder.width;
+                        let decoder_height = video_decoder.height;
+                        let rgb_frame = match video_decoder.convert_to_rgba(&decoded) {
+                            Ok(f) => f,
+                            Err(e) => {
+                                log::error!("[Controller] Convert to RGBA failed: {}", e);
+                                continue;
+                            }
+                        };
                         let decode_elapsed_ms = decode_start.elapsed().as_secs_f32() * 1000.0;
                         let mut buf = match recycle_rx.try_recv() {
                             Ok(mut b) => {
-                                b.resize(video_decoder.frame_size, 0);
+                                b.resize(frame_size, 0);
                                 b
                             }
                             Err(_) => {
-                                let mut b = Vec::with_capacity(video_decoder.frame_size);
-                                b.resize(video_decoder.frame_size, 0);
+                                let mut b = Vec::with_capacity(frame_size);
+                                b.resize(frame_size, 0);
                                 b
                             }
                         };
-                        buf.copy_from_slice(rgb_frame.data(0));
 
-                        let timestamp_us = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_micros() as u64;
+                        // Handle stride padding: FFmpeg may pad each row for
+                        // alignment (stride > width*4), especially with VAAPI.
+                        // Copy row-by-row to strip the padding when needed.
+                        let stride = rgb_frame.stride(0) as usize;
+                        let row_bytes = decoder_width as usize * 4;
+                        let src_data = rgb_frame.data(0);
+                        if stride == row_bytes {
+                            buf.copy_from_slice(src_data);
+                        } else {
+                            for y in 0..decoder_height as usize {
+                                let src_offset = y * stride;
+                                let dst_offset = y * row_bytes;
+                                buf[dst_offset..dst_offset + row_bytes]
+                                    .copy_from_slice(&src_data[src_offset..src_offset + row_bytes]);
+                            }
+                        }
 
-                        if let Err(e) = v_tx.send(VideoMsg::Data {
-                            data: buf,
-                            width: video_decoder.width,
-                            height: video_decoder.height,
+                        let data = buf;
+                        match v_tx.try_send(VideoMsg::Data {
+                            data,
+                            width: decoder_width,
+                            height: decoder_height,
                             decode_time_ms: decode_elapsed_ms,
-                            timestamp_us,
+                            timestamp_us: packet_arrival_us,
                         }) {
-                            log::warn!("[Controller] Video receiver dropped, stopping video loop: {}", e);
-                            break;
+                            Ok(_) => {}
+                            Err(crossbeam_channel::TrySendError::Full(VideoMsg::Data { data, .. })) => {
+                                // Channel is full, recycle buffer and drop frame to prevent latency and OOM
+                                let _ = recycle_tx.send(data);
+                            }
+                            Err(e) => {
+                                log::warn!("[Controller] Video receiver dropped, stopping video loop: {}", e);
+                                break;
+                            }
                         }
                     } else {
                         log::info!("[Controller] Config packet received (frame_count={}, is_config={})", frame_count, is_config);
@@ -474,6 +513,7 @@ impl ScrcpyConnection {
         meta_flag: bool,
         scid: &str,
         recycle_rx: crossbeam_channel::Receiver<Vec<u8>>,
+        recycle_tx: crossbeam_channel::Sender<Vec<u8>>,
     ) {
         log::info!("[Controller] {}", t!("scrcpy.handleVideoConnection"));
         if meta_flag {
@@ -490,7 +530,7 @@ impl ScrcpyConnection {
             _ = token.cancelled()=>{
                 log::info!("[Controller] {}", t!("scrcpy.videoConnectionReaderCancelled"));
             }
-            _ = self.video_handler(v_tx.clone(), m_tx, scid, recycle_rx)=>{
+            _ = self.video_handler(v_tx.clone(), m_tx, scid, recycle_rx, recycle_tx)=>{
                 log::error!("[Controller] {}", t!("scrcpy.videoReadShutdownUnexpectedly"));
                 finnal_token.cancel();
             }

@@ -289,6 +289,9 @@ function AutoInputBinding({
   const [isRecording, setIsRecording] = useState(false);
   const inputRef = useRef<InputRef>(null);
   const startRecord = useRef(() => { });
+  // Layout map: event.code → character visible on the key for the current keyboard layout
+  // e.g. on Turkish F keyboard: "Quote" → "i", "Semicolon" → "ş"
+  const [layoutMap, setLayoutMap] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     startRecord.current = mappingButtonBindFactory(
@@ -298,10 +301,35 @@ function AutoInputBinding({
     ).startRecord;
   }, []);
 
+  // Load keyboard layout map once on mount (Chrome/Edge only, silent fallback on other browsers)
+  useEffect(() => {
+    const nav = navigator as any;
+    if (nav.keyboard?.getLayoutMap) {
+      nav.keyboard.getLayoutMap()
+        .then((map: any) => {
+          const m = new Map<string, string>();
+          for (const [code, key] of map) {
+            // Only use single printable non-whitespace characters
+            if (typeof key === "string" && key.trim().length === 1) {
+              m.set(code as string, key.toUpperCase());
+            }
+          }
+          setLayoutMap(m);
+        })
+        .catch(() => { /* Not supported, use code names */ });
+    }
+  }, []);
+
+  // Display using layout-aware character names when available
+  // e.g. "Quote" → "İ" on Turkish F, "Quote" → "'" on US
+  const displayBind = bind
+    .map((k) => layoutMap.get(k) ?? k)
+    .join("+");
+
   return (
     <Input
       ref={inputRef}
-      value={bind.join("+")}
+      value={displayBind}
       placeholder={t("mappings.common.bind.autoInputPlaceholder")}
       readOnly
       onDoubleClick={() => {
@@ -380,7 +408,7 @@ export function DeviceBackground({ alpha }: { alpha?: number }) {
 
   return (
     <div
-      className="absolute w-full h-full bg-[length:100%_100%] bg-origin-content bg-no-repeat"
+      className="absolute w-full h-full bg-contain bg-center bg-no-repeat"
       style={{
         backgroundImage: `url(${backgroundImage})`,
       }}

@@ -31,6 +31,7 @@ use crate::{
         observation::{BindMappingObservation, MappingObservation},
         raw_input::{BindMappingRawInput, MappingRawInput},
         script::{BindMappingScript, MappingScript},
+        auto_repeat::{BindMappingAutoRepeat, MappingAutoRepeat},
         swipe::{BindMappingSwipe, MappingSwipe},
         tap::{
             BindMappingMultipleTap, BindMappingRepeatTap, BindMappingSingleTap, MappingMultipleTap,
@@ -74,6 +75,8 @@ seq!(N in 1..=32 {
             RawInput~N,
             #[ineffable(continuous)]
             Script~N,
+            #[ineffable(pulse)]
+            AutoRepeat~N,
         )*
     }
 
@@ -101,6 +104,7 @@ seq!(N in 1..=32 {
                     MappingAction::CancelCast~N => self.clone()._cancelcast~N(),
                     MappingAction::Fps~N => self.clone()._fps~N(),
                     MappingAction::RawInput~N => self.clone()._rawinput~N(),
+                    MappingAction::AutoRepeat~N => self.clone()._autorepeat~N(),
                 )*
                 _ => panic!("ineff_pulse called on non-pulse variant"),
             }
@@ -194,7 +198,8 @@ impl_mapping_related! {
     Fps,
     Fire,
     RawInput,
-    Script
+    Script,
+    AutoRepeat
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -264,6 +269,7 @@ impl BindMappingConfig {
                     BindMappingType::Fire(m) => (m.bind.to_string(), m.position.into()),
                     BindMappingType::RawInput(m) => (m.bind.to_string(), m.position.into()),
                     BindMappingType::Script(m) => (m.bind.to_string(), m.position.into()),
+                    BindMappingType::AutoRepeat(m) => (m.bind.to_string(), m.position.into()),
                 };
                 (mapping, binding, pos, size)
             })

@@ -36,7 +36,9 @@ impl ControlledDevice {
 
     pub async fn add_device(device_id: String, scid: String, main: bool, socket_ids: Vec<String>) {
         let mut device_list = CONTROLLED_DEVICES.write().await;
-        device_list.push(ScrcpyDevice::new(device_id, scid, main, socket_ids));
+        if !device_list.iter().any(|d| d.device_id == device_id || d.scid == scid) {
+            device_list.push(ScrcpyDevice::new(device_id, scid, main, socket_ids));
+        }
     }
 
     pub async fn update_device_name(scid: String, name: String) {

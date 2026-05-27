@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { useEffect } from "react";
 import { useAppDispatch, useAppSelector } from "../store/store";
 import { ItemBox, ItemBoxContainer } from "./common/ItemBox";
 import {
@@ -94,6 +95,10 @@ export default function Settings() {
     }
     dispatch(setIsLoading(false));
   }
+
+  useEffect(() => {
+    loadLocalConfig();
+  }, []);
 
   async function openDataPath() {
     dispatch(setIsLoading(true));

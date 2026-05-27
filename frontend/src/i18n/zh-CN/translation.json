@@ -257,6 +257,14 @@
         "result": "运行结果"
       },
       "name": "脚本"
+    },
+    "autoRepeat": {
+      "setting": {
+        "title": "映射配置 - 自动连点",
+        "target_key": "目标按键 (如 5)",
+        "interval": "重复间隔 (毫秒)"
+      },
+      "name": "自动连点"
     }
   },
   "settings": {

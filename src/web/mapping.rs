@@ -723,6 +723,9 @@ async fn migrate_mapping(
             MappingType::Script(m) => {
                 m.position *= scale;
             }
+            MappingType::AutoRepeat(m) => {
+                m.position *= scale;
+            }
         });
 
     // save to file

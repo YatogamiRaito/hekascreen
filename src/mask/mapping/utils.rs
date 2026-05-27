@@ -74,19 +74,17 @@ impl ControlMsgHelper {
         size: Vec2,
         pos: Vec2,
     ) {
-        cs_tx
-            .send(ScrcpyControlMsg::InjectTouchEvent {
-                action,
-                pointer_id,
-                x: pos.x as i32,
-                y: pos.y as i32,
-                w: size.x as u16,
-                h: size.y as u16,
-                pressure: half::f16::from_f32_const(1.0),
-                action_button: MotionEventButtons::PRIMARY,
-                buttons: MotionEventButtons::PRIMARY,
-            })
-            .unwrap();
+        let _ = cs_tx.send(ScrcpyControlMsg::InjectTouchEvent {
+            action,
+            pointer_id,
+            x: pos.x as i32,
+            y: pos.y as i32,
+            w: size.x as u16,
+            h: size.y as u16,
+            pressure: half::f16::from_f32_const(1.0),
+            action_button: MotionEventButtons::PRIMARY,
+            buttons: MotionEventButtons::PRIMARY,
+        });
     }
 
     pub fn send_keycode(
@@ -101,14 +99,12 @@ impl ControlMsgHelper {
         } else {
             constant::KeyEventAction::Up
         };
-        cs_tx
-            .send(ScrcpyControlMsg::InjectKeycode {
-                action,
-                keycode,
-                repeat,
-                metastate,
-            })
-            .unwrap();
+        let _ = cs_tx.send(ScrcpyControlMsg::InjectKeycode {
+            action,
+            keycode,
+            repeat,
+            metastate,
+        });
     }
 
     pub fn set_clipboard(
@@ -118,13 +114,11 @@ impl ControlMsgHelper {
         paste: bool,
     ) {
         let sequence = sequence.unwrap_or_else(|| rand::random());
-        cs_tx
-            .send(ScrcpyControlMsg::SetClipboard {
-                sequence,
-                paste,
-                text,
-            })
-            .unwrap();
+        let _ = cs_tx.send(ScrcpyControlMsg::SetClipboard {
+            sequence,
+            paste,
+            text,
+        });
     }
 }
 

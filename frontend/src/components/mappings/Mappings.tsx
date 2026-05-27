@@ -64,6 +64,7 @@ import { useTranslation } from "react-i18next";
 import { ItemBox, ItemBoxContainer } from "../common/ItemBox";
 import ButtonFire from "./ButtonFire";
 import ButtonScript from "./ButtonScript";
+import ButtonAutoRepeat from "./ButtonAutoRepeat";
 
 type MappingFileTabelItem = {
   file: string;
@@ -401,6 +402,7 @@ const buttonTypes = [
   "Fire",
   "RawInput",
   "Script",
+  "AutoRepeat",
 ];
 
 const mappingButtonMap = {
@@ -417,6 +419,7 @@ const mappingButtonMap = {
   Fire: ButtonFire,
   RawInput: ButtonRawInput,
   Script: ButtonScript,
+  AutoRepeat: ButtonAutoRepeat,
 };
 
 const mappingConstructorMap: any = Object.fromEntries(
@@ -440,7 +443,9 @@ function Displayer({
 }) {
   const dispatch = useAppDispatch();
   const maskArea = useAppSelector((state) => state.other.maskArea);
+  const backgroundImage = useAppSelector((state) => state.other.backgroundImage);
   const { t } = useTranslation();
+  const [detectedSize, setDetectedSize] = useState<{ width: number; height: number } | null>(null);
 
   const cursorPosRef = useRef<HTMLDivElement>(null);
   const displayerRef = useRef<HTMLDivElement>(null);
@@ -468,6 +473,19 @@ function Displayer({
     };
   }, [displayerRef.current]);
 
+  // Detect background image natural dimensions to warn about size mismatch
+  useEffect(() => {
+    if (!backgroundImage) {
+      setDetectedSize(null);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      setDetectedSize({ width: img.naturalWidth, height: img.naturalHeight });
+    };
+    img.src = backgroundImage;
+  }, [backgroundImage]);
+
   const { ratioStyle, originalSize } = useMemo(() => {
     return {
       originalSize: state.current.original_size,
@@ -477,6 +495,26 @@ function Displayer({
       },
     };
   }, [state.current.original_size.width, state.current.original_size.height]);
+
+  const sizeMismatch =
+    detectedSize !== null &&
+    (detectedSize.width !== originalSize.width ||
+      detectedSize.height !== originalSize.height);
+
+  function syncSizeToScreenshot() {
+    if (!detectedSize) return;
+    setState((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        edited: true,
+        current: {
+          ...prev.current,
+          original_size: { width: detectedSize.width, height: detectedSize.height },
+        },
+      };
+    });
+  }
 
   function updateMapping(
     index: number,
@@ -532,11 +570,31 @@ function Displayer({
 
   return (
     <div className="w-full">
-      <Flex justify="space-between">
+      <Flex justify="space-between" align="center">
         <CursorPos ref={cursorPosRef} />
-        <div className="color-text-secondary font-bold">
-          {`[${originalSize.width} x ${originalSize.height}]`}
-        </div>
+        <Flex align="center" gap={6}>
+          {sizeMismatch && (
+            <Popconfirm
+              title={`${t("mappings.displayer.sizeMismatch", "Size mismatch")}: ${detectedSize!.width}×${detectedSize!.height}`}
+              description={t("mappings.displayer.sizeMismatchDesc", "Screenshot size differs from mapping size. Sync to fix display ratio?")}
+              onConfirm={syncSizeToScreenshot}
+              okText={t("mappings.displayer.syncSize", "Sync")}
+              cancelText={t("common.cancel", "Cancel")}
+            >
+              <Button
+                size="small"
+                danger
+                type="text"
+                title={`${t("mappings.displayer.sizeMismatch", "Size mismatch")}: ${detectedSize!.width}×${detectedSize!.height}`}
+              >
+                ⚠ {`${detectedSize!.width}×${detectedSize!.height}`}
+              </Button>
+            </Popconfirm>
+          )}
+          <div className="color-text-secondary font-bold">
+            {`[${originalSize.width} x ${originalSize.height}]`}
+          </div>
+        </Flex>
       </Flex>
       <div
         ref={displayerRef}

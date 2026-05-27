@@ -1,5 +1,9 @@
 import axios, { type AxiosResponse, type ResponseType } from "axios";
 
+if (typeof window !== "undefined" && (window as any).API_KEY) {
+  axios.defaults.headers.common["X-API-Key"] = (window as any).API_KEY;
+}
+
 async function handleRequest<D = any>(
   req: () => Promise<AxiosResponse>
 ): Promise<{ message: string; data: D }> {

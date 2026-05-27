@@ -1,4 +1,5 @@
 use std::time::Duration;
+use std::collections::HashMap;
 
 use axum::{
     Json, Router,
@@ -79,6 +80,28 @@ fn gen_scid() -> String {
     format!("10{}", suffix) // ensure 8 digits(HEX) and less than MAX_INT32
 }
 
+use once_cell::sync::Lazy;
+use std::collections::HashSet;
+use tokio::sync::Mutex;
+
+static CONNECTING_DEVICES: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+static ACTIVE_PROCESSES: Lazy<Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+struct ConnectingGuard {
+    device_id: String,
+}
+
+impl Drop for ConnectingGuard {
+    fn drop(&mut self) {
+        let device_id = self.device_id.clone();
+        tokio::spawn(async move {
+            let mut connecting = CONNECTING_DEVICES.lock().await;
+            connecting.remove(&device_id);
+        });
+    }
+}
+
 #[derive(Deserialize)]
 struct PostDataControlDevice {
     device_id: String,
@@ -93,10 +116,11 @@ async fn _control_device(
     d_tx: &UnboundedSender<ControllerCommand>,
 ) -> Result<JsonResponse, WebServerError> {
     let device_id = device_id.to_string();
-    let local_config = LocalConfig::get();
 
+    // Step 1: Check CONTROLLED_DEVICES without holding any lock.
+    // This avoids holding a tokio Mutex across an .await point and
+    // serves as a fast early-exit for the common case.
     let device_list = ControlledDevice::get_device_list().await;
-    // check if device is controlled
     if device_list
         .iter()
         .any(|device| device.device_id == device_id)
@@ -107,6 +131,26 @@ async fn _control_device(
         ));
     }
 
+    // Step 2: Atomically check-and-insert in CONNECTING_DEVICES.
+    // No .await inside this block — the lock is never held across a yield point.
+    // Any concurrent _control_device() call for the same device_id will be
+    // rejected here, closing the TOCTOU window between step 1 and add_device().
+    // add_device() (share.rs) also performs a dedup check as a final safety net.
+    {
+        let mut connecting = CONNECTING_DEVICES.lock().await;
+        if connecting.contains(&device_id) {
+            return Err(WebServerError(
+                400,
+                format!("{}: {}", t!("web.device.alreadyControlled"), device_id),
+            ));
+        }
+        connecting.insert(device_id.clone());
+    }
+
+    let _guard = ConnectingGuard { device_id: device_id.clone() };
+    let local_config = LocalConfig::get();
+
+
     // prepare for scrcpy app
     let scid = gen_scid();
     let version = std::fs::read_dir(relate_to_root_path(["assets"]))
@@ -116,11 +160,17 @@ async fn _control_device(
                 .filter_map(|entry| entry.ok())
                 .filter_map(|entry| {
                     let file_name = entry.file_name().into_string().ok()?;
-                    file_name
-                        .strip_prefix("scrcpy-mask-server-v")
-                        .map(|v| v.to_string())
+                    let v_str = file_name.strip_prefix("scrcpy-mask-server-v")?.to_string();
+                    let normalized = if v_str.split('.').count() == 2 {
+                        format!("{}.0", v_str)
+                    } else {
+                        v_str.clone()
+                    };
+                    let parsed = semver::Version::parse(&normalized).ok()?;
+                    Some((parsed, v_str))
                 })
-                .max()
+                .max_by(|a, b| a.0.cmp(&b.0))
+                .map(|(_, original)| original)
         })
         .unwrap_or_else(|| "4.0".to_string());
     let scrcpy_path = relate_to_root_path(["assets", &format!("scrcpy-mask-server-v{}", version)]);
@@ -157,7 +207,7 @@ async fn _control_device(
     args.push("audio=false".to_string());
 
     // create device
-    let main = device_list.len() == 0;
+    let main = ControlledDevice::get_device_list().await.len() == 0;
     let mut socket_id: Vec<String> = Vec::new();
     let mut commands: Vec<ControllerCommand> = Vec::new();
     if main {
@@ -220,13 +270,70 @@ async fn _control_device(
     sleep(Duration::from_millis(500)).await;
     log::info!("[WebServe] {}", t!("web.device.startingScrcpyApp"));
 
-    let h = Device::shell_process(&device_id, args);
+    let mut child = match tokio::process::Command::new(&local_config.adb_path)
+        .arg("-s")
+        .arg(&device_id)
+        .arg("shell")
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("[WebServe] Failed to start adb shell: {}", e);
+            return Err(WebServerError(500, format!("Failed to start adb shell: {}", e)));
+        }
+    };
+
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+
+    let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<()>();
+    {
+        let mut processes = ACTIVE_PROCESSES.lock().await;
+        processes.insert(device_id.clone(), kill_tx);
+    }
+
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let device_id_log = device_id.clone();
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stdout).lines();
+        while let Ok(Some(l)) = reader.next_line().await {
+            log::info!("[Adb stdout {}] {}", device_id_log, l);
+        }
+    });
+
+    let device_id_err = device_id.clone();
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        while let Ok(Some(l)) = reader.next_line().await {
+            log::error!("[Adb stderr {}] {}", device_id_err, l);
+        }
+    });
 
     let scid_copy = scid.clone();
+    let device_id_wait = device_id.clone();
     tokio::spawn(async move {
-        h.await.unwrap().unwrap();
+        tokio::select! {
+            status = child.wait() => {
+                log::info!("[WebServe] Child exited on its own: {:?}", status);
+            }
+            _ = kill_rx => {
+                log::info!("[WebServe] Kill signal received, killing child process for device: {}", device_id_wait);
+                let _ = child.kill().await;
+                // Wait with a timeout of 2 seconds for it to exit
+                if let Err(_) = tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await {
+                    log::warn!("[WebServe] Child process did not exit after kill signal, ignoring");
+                }
+            }
+        }
+
         log::info!("[WebServe] {}", t!("web.device.removingDeviceAfterExit"));
         ControlledDevice::remove_device(&scid_copy).await;
+
+        let mut processes = ACTIVE_PROCESSES.lock().await;
+        processes.remove(&device_id_wait);
     });
 
     Ok(JsonResponse::success(
@@ -285,6 +392,14 @@ async fn _decontrol_device(
     device_id: &str,
     d_tx: &UnboundedSender<ControllerCommand>,
 ) -> Result<JsonResponse, WebServerError> {
+    {
+        let mut processes = ACTIVE_PROCESSES.lock().await;
+        if let Some(kill_tx) = processes.remove(device_id) {
+            log::info!("[WebServe] Sending kill signal to adb shell process for device: {}", device_id);
+            let _ = kill_tx.send(());
+        }
+    }
+
     let device_list = ControlledDevice::get_device_list().await;
     for device in device_list {
         if device.device_id == device_id {

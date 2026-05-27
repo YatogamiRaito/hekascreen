@@ -8,7 +8,7 @@ unsafe extern "C" fn get_hw_format(
 ) -> ffmpeg_next::ffi::AVPixelFormat {
     unsafe {
         let mut i = 0;
-        while *pix_fmts.offset(i) != ffmpeg_next::ffi::AVPixelFormat::AV_PIX_FMT_NONE {
+        while i < 1000 && *pix_fmts.offset(i) != ffmpeg_next::ffi::AVPixelFormat::AV_PIX_FMT_NONE {
             if *pix_fmts.offset(i) == ffmpeg_next::ffi::AVPixelFormat::AV_PIX_FMT_VAAPI {
                 return ffmpeg_next::ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
             }
@@ -152,8 +152,14 @@ pub struct VideoDecoder {
     pub must_merge_config: bool,
     pub packet_merger: PacketMerger,
     pub hw_device_ctx: *mut ffmpeg_next::ffi::AVBufferRef,
+    pub cpu_frame: frame::Video,
+    pub rgba_frame: frame::Video,
 }
 
+// Safety: VideoDecoder contains raw pointers (*mut AVBufferRef) which are not automatically Send.
+// However, the raw pointer points to a thread-safe FFmpeg hardware device context that is only
+// ever dereferenced or modified inside the single-threaded video decoder run loop (connection.rs).
+// No concurrent access to these raw pointers occurs, making VideoDecoder safe to transfer (Send) across threads.
 unsafe impl Send for VideoDecoder {}
 
 impl Drop for VideoDecoder {
@@ -167,8 +173,9 @@ impl Drop for VideoDecoder {
 }
 
 impl VideoDecoder {
-    pub fn new(codec_id: VideoCodec, width: u32, height: u32) -> Self {
-        let sw_codec = decoder::find(codec_id.into()).unwrap();
+    pub fn new(codec_id: VideoCodec, width: u32, height: u32) -> Result<Self, String> {
+        let sw_codec = decoder::find(codec_id.into())
+            .ok_or_else(|| format!("FFmpeg codec '{:?}' not available", codec_id))?;
         let mut codec_context = codec::Context::new_with_codec(sw_codec);
         let flags = unsafe {
             let raw_flags = (*codec_context.as_mut_ptr()).flags;
@@ -229,13 +236,14 @@ impl VideoDecoder {
             }
         }
 
-        let video_decoder = codec_context.decoder().video().unwrap();
+        let video_decoder = codec_context.decoder().video()
+            .map_err(|e| format!("Failed to initialize video decoder: {}", e))?;
 
         if using_hw {
             log::info!("[HekaScreen] HW decoding (VAAPI) initialized successfully");
         }
 
-        Self {
+        Ok(Self {
             decoder: video_decoder,
             scaler: None,
             width,
@@ -244,7 +252,9 @@ impl VideoDecoder {
             packet_merger: PacketMerger::new(),
             frame_size: (width * height * 4) as usize,
             hw_device_ctx,
-        }
+            cpu_frame: frame::Video::empty(),
+            rgba_frame: frame::Video::empty(),
+        })
     }
 
     /// Returns true if a VAAPI hardware device context was successfully created.
@@ -259,17 +269,18 @@ impl VideoDecoder {
         let height = frame.height();
 
         if self.scaler.is_none() || width != self.width || height != self.height {
-            let mut cpu_frame = frame::Video::empty();
+            self.cpu_frame = frame::Video::empty();
+            self.rgba_frame = frame::Video::empty();
             let frame_format = unsafe {
                 let raw_frame = frame.as_ptr();
                 if (*raw_frame).format == ffmpeg_next::ffi::AVPixelFormat::AV_PIX_FMT_VAAPI as std::ffi::c_int {
                     let ret = ffmpeg_next::ffi::av_hwframe_transfer_data(
-                        cpu_frame.as_mut_ptr(),
+                        self.cpu_frame.as_mut_ptr(),
                         raw_frame,
                         0,
                     );
                     if ret >= 0 {
-                        cpu_frame.format()
+                        self.cpu_frame.format()
                     } else {
                         frame.format()
                     }
@@ -300,35 +311,30 @@ impl VideoDecoder {
         }
     }
 
-    pub fn conver_to_rgba(&mut self, decoded: &frame::Video) -> frame::Video {
-        let mut cpu_frame = frame::Video::empty();
+    pub fn convert_to_rgba(&mut self, decoded: &frame::Video) -> Result<&frame::Video, String> {
         let frame_to_scale = unsafe {
             let raw_frame = decoded.as_ptr();
             if (*raw_frame).format == ffmpeg_next::ffi::AVPixelFormat::AV_PIX_FMT_VAAPI as std::ffi::c_int {
                 let ret = ffmpeg_next::ffi::av_hwframe_transfer_data(
-                    cpu_frame.as_mut_ptr(),
+                    self.cpu_frame.as_mut_ptr(),
                     raw_frame,
                     0,
                 );
                 if ret < 0 {
-                    log::error!("[HekaScreen] Failed to transfer VAAPI hardware frame to CPU: {}", ret);
-                    decoded
+                    return Err(format!("Failed to transfer VAAPI hardware frame to CPU: {}", ret));
                 } else {
-                    cpu_frame.set_pts(decoded.pts());
-                    &cpu_frame
+                    self.cpu_frame.set_pts(decoded.pts());
+                    &self.cpu_frame
                 }
             } else {
                 decoded
             }
         };
 
-        let mut rgba_frame = frame::Video::empty();
-        self.scaler
-            .as_mut()
-            .unwrap()
-            .run(frame_to_scale, &mut rgba_frame)
-            .unwrap();
-        rgba_frame
+        let scaler = self.scaler.as_mut().ok_or("Scaler not initialized. Call update() before convert_to_rgba().")?;
+        scaler.run(frame_to_scale, &mut self.rgba_frame)
+            .map_err(|e| format!("Scaler run failed: {}", e))?;
+        Ok(&self.rgba_frame)
     }
 }
 
@@ -348,5 +354,9 @@ pub enum VideoMsg {
         width: u32,
         height: u32,
     },
+    ScriptError {
+        error: String,
+    },
+    ScriptClearError,
     Close,
 }

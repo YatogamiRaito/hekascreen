@@ -11,8 +11,10 @@ use crate::{
         cursor::{CursorPosition, CursorState},
         script_helper::ScriptAST,
     },
-    utils::{ChannelReceiverM, ChannelSenderCS},
+    utils::{ChannelReceiverM, ChannelSenderCS, ChannelSenderV},
+    scrcpy::media::VideoMsg,
 };
+use bevy_tokio_tasks::TokioTasksRuntime;
 
 #[derive(Debug)]
 pub enum MaskCommand {
@@ -60,6 +62,7 @@ pub struct PendingResize {
 pub fn handle_mask_command(
     m_rx: Res<ChannelReceiverM>,
     cs_tx_res: Res<ChannelSenderCS>,
+    v_tx_res: Res<ChannelSenderV>,
     cursor_pos: Res<CursorPosition>,
     mut window_query: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut next_mapping_state: ResMut<NextState<MappingState>>,
@@ -68,6 +71,7 @@ pub fn handle_mask_command(
     mut active_mapping: ResMut<ActiveMappingConfig>,
     mut mask_size: ResMut<MaskSize>,
     mut pending_resize: Local<Option<PendingResize>>,
+    runtime: ResMut<TokioTasksRuntime>,
 ) {
     if let Some(ref mut pending) = *pending_resize {
         if let Ok((_, mut window)) = window_query.single_mut() {
@@ -250,31 +254,40 @@ pub fn handle_mask_command(
             MaskCommand::EvalScript { script } => {
                 let ast = match ScriptAST::new(&script) {
                     Err(e) => {
-                        oneshot_tx.send(Err(e)).unwrap();
-                        return;
+                        let _ = oneshot_tx.send(Err(e));
+                        continue;
                     }
                     Ok(ast) => ast,
                 };
 
                 if let Some(mapping_config) = &active_mapping.0 {
-                    match ast.eval_script(
-                        &cs_tx_res.0,
-                        mapping_config.original_size.into(),
-                        cursor_pos.0,
-                        mask_size.0
-                    ) {
-                        Err(e) => {
-                            oneshot_tx.send(Err(e.to_string())).unwrap();
-                            return;
+                    let cs_tx = cs_tx_res.0.clone();
+                    let v_tx = v_tx_res.0.clone();
+                    let original_size = mapping_config.original_size.into();
+                    let cursor_pos = cursor_pos.0;
+                    let mask_size = mask_size.0;
+
+                    let _ = v_tx.send(VideoMsg::ScriptClearError);
+                    runtime.spawn_background_task(move |_ctx| async move {
+                        let res = tokio::task::spawn_blocking(move || {
+                            ast.eval_script(&cs_tx, original_size, cursor_pos, mask_size)
+                        }).await;
+                        match res {
+                            Ok(Err(e)) => {
+                                let _ = v_tx.send(VideoMsg::ScriptError { error: format!("Eval Script: {}", e) });
+                                let _ = oneshot_tx.send(Err(e.to_string()));
+                            }
+                            Ok(Ok(_)) => {
+                                let _ = oneshot_tx.send(Ok(String::new()));
+                            }
+                            Err(e) => {
+                                log::error!("Tokio task join error: {}", e);
+                                let _ = oneshot_tx.send(Err(e.to_string()));
+                            }
                         }
-                        Ok(_) => {
-                            oneshot_tx.send(Ok(String::new())).unwrap();
-                        }
-                    }
+                    });
                 } else {
-                    oneshot_tx
-                        .send(Err(t!("mask.evalScriptnoMappingError").to_string()))
-                        .unwrap();
+                    let _ = oneshot_tx.send(Err(t!("mask.evalScriptnoMappingError").to_string()));
                 }
             }
         }

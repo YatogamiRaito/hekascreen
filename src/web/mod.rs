@@ -14,7 +14,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{net::SocketAddrV4, thread};
 use tokio::{fs, sync::{broadcast, mpsc::UnboundedSender, oneshot}};
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 
 use crate::{
     mask::mask_command::MaskCommand,
@@ -22,6 +22,41 @@ use crate::{
     utils::relate_to_root_path,
     web::ws::WebSocketNotification,
 };
+
+use once_cell::sync::Lazy;
+use rand::Rng;
+
+pub static API_KEY: Lazy<String> = Lazy::new(|| {
+    let mut rng = rand::rng();
+    (0..16)
+        .map(|_| format!("{:02x}", rng.random::<u8>()))
+        .collect()
+});
+
+async fn auth_middleware(req: axum::extract::Request, next: axum::middleware::Next) -> Result<Response, StatusCode> {
+    let header_key = req.headers()
+        .get("x-api-key")
+        .and_then(|val| val.to_str().ok());
+
+    let query_key = req.uri()
+        .query()
+        .and_then(|q| {
+            q.split('&')
+                .find(|pair| pair.starts_with("token="))
+                .map(|pair| pair["token=".len()..].to_string())
+        });
+
+    let request_key = header_key.map(|s| s.to_string()).or(query_key);
+
+    if let Some(key) = request_key {
+        if key == *API_KEY {
+            return Ok(next.run(req).await);
+        }
+    }
+
+    log::warn!("[WebAuth] Unauthorized request to {}", req.uri().path());
+    Err(StatusCode::UNAUTHORIZED)
+}
 
 pub struct Server;
 
@@ -82,6 +117,16 @@ impl Server {
         m_tx: crossbeam_channel::Sender<(MaskCommand, oneshot::Sender<Result<String, String>>)>,
         ws_tx: broadcast::Sender<WebSocketNotification>,
     ) -> Router {
+        let api_routes = Router::new()
+            .nest(
+                "/device",
+                device::routers(cs_tx.clone(), d_tx.clone(), m_tx.clone()),
+            )
+            .nest("/mapping", mapping::routers(m_tx.clone()))
+            .nest("/config", config::routers(m_tx.clone()))
+            .nest("/ws", ws::routers(cs_tx, ws_tx, d_tx))
+            .layer(axum::middleware::from_fn(auth_middleware));
+
         let router = Router::new()
             // Serve index.html with Cache-Control: no-store so the browser never
             // caches the entry point. JS/CSS assets have content hashes in their
@@ -90,24 +135,22 @@ impl Server {
             .route("/index.html", get(serve_index))
             .fallback_service(
                 ServeDir::new(relate_to_root_path(["assets", "web"])).not_found_service(
-                    ServeFile::new(relate_to_root_path(["assets", "web", "index.html"])),
+                    axum::routing::any(serve_index)
                 ),
             )
-            .nest(
-                "/api/device",
-                device::routers(cs_tx.clone(), d_tx, m_tx.clone()),
-            )
-            .nest("/api/mapping", mapping::routers(m_tx.clone()))
-            .nest("/api/config", config::routers(m_tx.clone()))
-            .nest("/api/ws", ws::routers(cs_tx, ws_tx));
+            .nest("/api", api_routes);
 
         #[cfg(debug_assertions)]
         {
             // allow CORS for development
             use tower_http::cors::{Any, CorsLayer};
+            use axum::http::HeaderValue;
 
             let cors = CorsLayer::new()
-                .allow_origin(Any)
+                .allow_origin([
+                    HeaderValue::from_static("http://localhost:5173"),
+                    HeaderValue::from_static("http://127.0.0.1:5173"),
+                ])
                 .allow_methods(Any)
                 .allow_headers(Any);
 
@@ -123,15 +166,22 @@ impl Server {
 /// loading stale JS bundles even after a new build.
 async fn serve_index() -> impl IntoResponse {
     let path = relate_to_root_path(["assets", "web", "index.html"]);
-    match fs::read(&path).await {
-        Ok(bytes) => (
-            [
-                ("Content-Type", "text/html; charset=utf-8"),
-                ("Cache-Control", "no-store"),
-            ],
-            bytes,
-        )
-            .into_response(),
+    match fs::read_to_string(&path).await {
+        Ok(html) => {
+            let injected_script = format!(
+                "<script>window.API_KEY = \"{}\";</script></head>",
+                *API_KEY
+            );
+            let modified_html = html.replace("</head>", &injected_script);
+            (
+                [
+                    ("Content-Type", "text/html; charset=utf-8"),
+                    ("Cache-Control", "no-store"),
+                ],
+                modified_html,
+            )
+                .into_response()
+        }
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }

@@ -257,6 +257,14 @@
         "result": "Çalışma sonucu"
       },
       "name": "Betik"
+    },
+    "autoRepeat": {
+      "setting": {
+        "title": "Eşleme Yapılandırması - Tekrarlı Tuş Döngüsü",
+        "target_key": "Hedef Tuş (örn. 5)",
+        "interval": "Tekrarlama Aralığı (ms)"
+      },
+      "name": "Tekrarlı Tuş Döngüsü"
     }
   },
   "settings": {

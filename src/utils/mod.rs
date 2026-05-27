@@ -18,6 +18,7 @@ use crate::{
     mask::mask_command::MaskCommand,
     scrcpy::{control_msg::ScrcpyControlMsg, media::VideoMsg},
     utils::share::UpdateInfo,
+    web::ws::WebSocketNotification,
 };
 
 pub const IDENTIFIER: &str = "com.akichase.scrcpy-mask";
@@ -76,6 +77,12 @@ pub struct ChannelSenderCS(pub broadcast::Sender<ScrcpyControlMsg>);
 #[derive(Resource)]
 pub struct ChannelReceiverV(pub crossbeam_channel::Receiver<VideoMsg>);
 
+#[derive(Resource, Clone)]
+pub struct ChannelSenderV(pub crossbeam_channel::Sender<VideoMsg>);
+
+#[derive(Resource, Clone)]
+pub struct ChannelSenderWS(pub broadcast::Sender<WebSocketNotification>);
+
 #[derive(Resource)]
 pub struct ChannelReceiverM(
     pub crossbeam_channel::Receiver<(MaskCommand, oneshot::Sender<Result<String, String>>)>,
@@ -86,12 +93,16 @@ pub struct VideoBufferRecycler(pub crossbeam_channel::Sender<Vec<u8>>);
 
 pub static LAST_INPUT_TIME_MICROS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-#[derive(Resource, Default, Clone)]
+#[derive(Resource, Clone)]
 pub struct LiveDiagnostics {
     // Per-frame perf counters (updated every decoded frame)
     pub decode_time_ms: f32,
     pub queue_delay_ms: f32,
     pub last_input_latency_ms: Option<f32>,
+    // Real video FPS (counted from decoded frames, not Bevy tick rate)
+    pub video_fps: f32,
+    pub video_frame_count: u32,
+    pub video_fps_window_start: std::time::Instant,
     // Stream-level info (set once when the video stream is established,
     // cleared on VideoMsg::Close). Values here reflect what is *actually*
     // active, not just what the user enabled in Settings.
@@ -99,6 +110,25 @@ pub struct LiveDiagnostics {
     pub hw_decode_active: bool,        // true only if VAAPI hw_device_ctx was created
     pub video_width: u32,
     pub video_height: u32,
+    pub last_script_error: Option<String>,
+}
+
+impl Default for LiveDiagnostics {
+    fn default() -> Self {
+        Self {
+            decode_time_ms: 0.0,
+            queue_delay_ms: 0.0,
+            last_input_latency_ms: None,
+            video_fps: 0.0,
+            video_frame_count: 0,
+            video_fps_window_start: std::time::Instant::now(),
+            video_codec: None,
+            hw_decode_active: false,
+            video_width: 0,
+            video_height: 0,
+            last_script_error: None,
+        }
+    }
 }
 
 pub async fn mask_win_move_helper(

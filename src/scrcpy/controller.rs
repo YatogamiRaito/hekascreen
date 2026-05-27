@@ -45,6 +45,7 @@ impl Controller {
         m_tx: crossbeam_channel::Sender<(MaskCommand, oneshot::Sender<Result<String, String>>)>,
         ws_tx: broadcast::Sender<WebSocketNotification>,
         recycle_rx: crossbeam_channel::Receiver<Vec<u8>>,
+        recycle_tx: crossbeam_channel::Sender<Vec<u8>>,
     ) {
         thread::spawn(move || {
             tokio::runtime::Builder::new_multi_thread()
@@ -52,7 +53,7 @@ impl Controller {
                 .build()
                 .unwrap()
                 .block_on(async move {
-                    Controller::run_server(addr, cs_tx, v_tx, d_rx, m_tx, ws_tx, recycle_rx).await;
+                    Controller::run_server(addr, cs_tx, v_tx, d_rx, m_tx, ws_tx, recycle_rx, recycle_tx).await;
                 });
         });
     }
@@ -128,6 +129,7 @@ impl Controller {
         m_tx: crossbeam_channel::Sender<(MaskCommand, oneshot::Sender<Result<String, String>>)>,
         ws_tx: broadcast::Sender<WebSocketNotification>,
         recycle_rx: crossbeam_channel::Receiver<Vec<u8>>,
+        recycle_tx: crossbeam_channel::Sender<Vec<u8>>,
     ) {
         log::info!("[Controller] {}: {}", t!("scrcpy.startingController"), addr);
         let listener = TcpListener::bind(addr).await.unwrap();
@@ -216,13 +218,14 @@ impl Controller {
                         log::info!("[Controller] {}: {}", t!("scrcpy.creatingMainVideo"), scid);
                         let v_tx_copy = v_tx.clone();
                         let recycle_rx_copy = recycle_rx.clone();
+                        let recycle_tx_copy = recycle_tx.clone();
                         match listener.accept().await {
                             Ok((socket, _)) => {
                                 socket.set_nodelay(true).ok();
                                 let m_tx_clone = m_tx.clone();
                                 tokio::spawn(async move {
                                     ScrcpyConnection::new(socket)
-                                        .handle_video(token, v_tx_copy, m_tx_clone, meta_flag, &scid, recycle_rx_copy)
+                                        .handle_video(token, v_tx_copy, m_tx_clone, meta_flag, &scid, recycle_rx_copy, recycle_tx_copy)
                                         .await;
                                 });
                             }

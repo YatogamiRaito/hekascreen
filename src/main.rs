@@ -15,8 +15,8 @@ use scrcpy_mask::{
         media::VideoMsg,
     },
     utils::{
-        ChannelReceiverM, ChannelReceiverV, ChannelSenderCS, check_for_update, relate_to_data_path,
-        VideoBufferRecycler, LiveDiagnostics,
+        ChannelReceiverM, ChannelReceiverV, ChannelSenderCS, ChannelSenderV, ChannelSenderWS,
+        check_for_update, relate_to_data_path, VideoBufferRecycler, LiveDiagnostics,
     },
     web::{self, ws::WebSocketNotification},
 };
@@ -107,7 +107,8 @@ fn main() {
     )
     .add_plugins(bevy_tokio_tasks::TokioTasksPlugin::default())
     .add_plugins(MaskPlugins)
-    .add_systems(Startup, (start_servers, check_for_update_system));
+    .add_systems(Startup, (start_servers, check_for_update_system))
+    .add_systems(Update, apply_present_mode_change);
 
     #[cfg(target_os = "linux")]
     app.add_systems(Update, handle_close_requested);
@@ -145,7 +146,7 @@ fn start_servers(mut commands: Commands) {
 
     let (cs_tx, _) = broadcast::channel::<ScrcpyControlMsg>(1000);
     let (ws_tx, _) = broadcast::channel::<WebSocketNotification>(1000);
-    let (v_tx, v_rx) = crossbeam_channel::unbounded::<VideoMsg>();
+    let (v_tx, v_rx) = crossbeam_channel::bounded::<VideoMsg>(8);
     let (m_tx, m_rx) =
         crossbeam_channel::unbounded::<(MaskCommand, oneshot::Sender<Result<String, String>>)>();
     let (d_tx, d_rx) = mpsc::unbounded_channel::<ControllerCommand>();
@@ -153,12 +154,14 @@ fn start_servers(mut commands: Commands) {
     let (recycle_tx, recycle_rx) = crossbeam_channel::bounded::<Vec<u8>>(16);
 
     commands.insert_resource(ChannelSenderCS(cs_tx.clone()));
+    commands.insert_resource(ChannelSenderV(v_tx.clone()));
+    commands.insert_resource(ChannelSenderWS(ws_tx.clone()));
     commands.insert_resource(ChannelReceiverV(v_rx));
     commands.insert_resource(ChannelReceiverM(m_rx));
-    commands.insert_resource(VideoBufferRecycler(recycle_tx));
+    commands.insert_resource(VideoBufferRecycler(recycle_tx.clone()));
     commands.insert_resource(LiveDiagnostics::default());
     web::Server::start(web_addr, cs_tx.clone(), d_tx, m_tx.clone(), ws_tx.clone());
-    controller::Controller::start(controller_addr, cs_tx, v_tx, d_rx, m_tx, ws_tx, recycle_rx);
+    controller::Controller::start(controller_addr, cs_tx, v_tx, d_rx, m_tx, ws_tx, recycle_rx, recycle_tx);
 }
 
 fn check_for_update_system(runtime: ResMut<TokioTasksRuntime>) {
@@ -176,5 +179,24 @@ fn handle_close_requested(
 ) {
     for _ in events.read() {
         exit.write(AppExit::default());
+    }
+}
+
+fn apply_present_mode_change(
+    mut window_query: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    mut last_mode: Local<String>,
+) {
+    let current = LocalConfig::get().present_mode.clone();
+    if *last_mode != current {
+        if let Ok(mut window) = window_query.get_single_mut() {
+            window.present_mode = match current.as_str() {
+                "AutoNoVsync" => PresentMode::AutoNoVsync,
+                "Immediate" => PresentMode::Immediate,
+                "Mailbox" => PresentMode::Mailbox,
+                _ => PresentMode::AutoVsync,
+            };
+            log::info!("[HekaScreen] Dynamically applied PresentMode: {}", current);
+        }
+        *last_mode = current;
     }
 }

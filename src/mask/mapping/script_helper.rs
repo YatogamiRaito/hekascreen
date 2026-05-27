@@ -26,6 +26,22 @@ pub enum ScriptVar {
 
 static SCRIPT_VARS: Lazy<Mutex<HashMap<String, ScriptVar>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
+static ACTIVE_REPEATS: Lazy<Mutex<HashMap<String, std::sync::mpsc::Sender<()>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+thread_local! {
+    static PRINT_COUNT: std::cell::Cell<usize> = std::cell::Cell::new(0);
+}
+
+static PRINT_RATE_LIMITER: Lazy<Mutex<(std::time::Instant, usize)>> = Lazy::new(|| {
+    Mutex::new((std::time::Instant::now(), 0))
+});
+
+#[derive(Debug, Clone)]
+pub struct UserFn {
+    pub params: Vec<String>,
+    pub body: Stmt,
+}
+
 #[derive(Parser)]
 #[grammar = "src/mask/mapping/script.pest"]
 struct ScriptParser;
@@ -42,6 +58,7 @@ pub struct ScriptAST {
     pub program: Program,
     pub script: String,
     pub empty: bool,
+    pub parse_error: Option<String>,
     pub build_in_funcs:
         HashMap<String, fn(&str, &SourceSpan, &[Value]) -> Result<Value, ScriptError>>,
 }
@@ -80,6 +97,33 @@ impl ScriptAST {
 
         ast.build_in_funcs
             .insert("print".to_string(), |_source, _span, args: &[Value]| {
+                let count = PRINT_COUNT.with(|c| {
+                    let next = c.get() + 1;
+                    c.set(next);
+                    next
+                });
+                if count > 1000 {
+                    if count == 1001 {
+                        log::warn!("[Script] Print limit exceeded (max 1000 prints). Suppressing further prints.");
+                    }
+                    return Ok(Value::Int(0));
+                }
+
+                // Global rate limiting: max 100 prints per second
+                let now = std::time::Instant::now();
+                let mut limiter = PRINT_RATE_LIMITER.lock().unwrap_or_else(|e| e.into_inner());
+                if now.duration_since(limiter.0).as_secs() >= 1 {
+                    limiter.0 = now;
+                    limiter.1 = 0;
+                }
+                limiter.1 += 1;
+                if limiter.1 > 100 {
+                    if limiter.1 == 101 {
+                        log::warn!("[Script] Global print rate limit exceeded (max 100 prints/sec). Suppressing prints.");
+                    }
+                    return Ok(Value::Int(0));
+                }
+
                 let output = args
                     .iter()
                     .map(|val| match val {
@@ -141,7 +185,14 @@ impl ScriptAST {
                     Value::Int(i) => i,
                     _ => unreachable!(),
                 };
-                let mut toggles = SCRIPT_TOGGLES.lock().unwrap();
+                let mut toggles = SCRIPT_TOGGLES.lock().unwrap_or_else(|e| e.into_inner());
+                if !toggles.contains_key(&id) && toggles.len() >= 10000 {
+                    return Err(ScriptError::from_span(
+                        span.clone(),
+                        source,
+                        "SCRIPT_TOGGLES limit exceeded (max 10000 entries)".to_string(),
+                    ));
+                }
                 let entry = toggles.entry(id).or_insert(false);
                 *entry = !*entry;
                 Ok(Value::Bool(*entry))
@@ -173,7 +224,14 @@ impl ScriptAST {
                         ));
                     }
                 };
-                let mut toggles = SCRIPT_TOGGLES.lock().unwrap();
+                let mut toggles = SCRIPT_TOGGLES.lock().unwrap_or_else(|e| e.into_inner());
+                if !toggles.contains_key(&id) && toggles.len() >= 10000 {
+                    return Err(ScriptError::from_span(
+                        span.clone(),
+                        source,
+                        "SCRIPT_TOGGLES limit exceeded (max 10000 entries)".to_string(),
+                    ));
+                }
                 toggles.insert(id, val);
                 Ok(Value::Int(0))
             },
@@ -193,7 +251,7 @@ impl ScriptAST {
                     Value::Int(i) => i,
                     _ => unreachable!(),
                 };
-                let toggles = SCRIPT_TOGGLES.lock().unwrap();
+                let toggles = SCRIPT_TOGGLES.lock().unwrap_or_else(|e| e.into_inner());
                 let val = toggles.get(&id).cloned().unwrap_or(false);
                 Ok(Value::Bool(val))
             },
@@ -225,7 +283,14 @@ impl ScriptAST {
                     Value::Bool(b) => ScriptVar::Bool(b),
                     Value::Str(s) => ScriptVar::Str(s),
                 };
-                let mut vars = SCRIPT_VARS.lock().unwrap();
+                let mut vars = SCRIPT_VARS.lock().unwrap_or_else(|e| e.into_inner());
+                if !vars.contains_key(&name) && vars.len() >= 10000 {
+                    return Err(ScriptError::from_span(
+                        span.clone(),
+                        source,
+                        "SCRIPT_VARS limit exceeded (max 10000 entries)".to_string(),
+                    ));
+                }
                 vars.insert(name, script_var);
                 Ok(Value::Int(0))
             },
@@ -251,7 +316,7 @@ impl ScriptAST {
                         ));
                     }
                 };
-                let vars = SCRIPT_VARS.lock().unwrap();
+                let vars = SCRIPT_VARS.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(var) = vars.get(&name) {
                     match var {
                         ScriptVar::Int(i) => Ok(Value::Int(*i)),
@@ -285,7 +350,7 @@ impl ScriptAST {
                         ));
                     }
                 };
-                let mut vars = SCRIPT_VARS.lock().unwrap();
+                let mut vars = SCRIPT_VARS.lock().unwrap_or_else(|e| e.into_inner());
                 vars.remove(&name);
                 Ok(Value::Int(0))
             },
@@ -311,7 +376,7 @@ impl ScriptAST {
                         ));
                     }
                 };
-                let vars = SCRIPT_VARS.lock().unwrap();
+                let vars = SCRIPT_VARS.lock().unwrap_or_else(|e| e.into_inner());
                 Ok(Value::Bool(vars.contains_key(&name)))
             },
         );
@@ -329,21 +394,24 @@ impl ScriptAST {
         if self.empty {
             return Ok(());
         }
+        PRINT_COUNT.with(|c| c.set(0));
         let cursor_relative_pos = cursor_pos / mask_size * original_size;
-        let mut vars: HashMap<String, Value> = HashMap::new();
-        vars.insert(
+        let mut initial_scope = HashMap::new();
+        initial_scope.insert(
             "ORIGINAL_W".to_string(),
             Value::Int((original_size.x) as i64),
         );
-        vars.insert("ORIGINAL_H".to_string(), Value::Int(original_size.y as i64));
-        vars.insert(
+        initial_scope.insert("ORIGINAL_H".to_string(), Value::Int(original_size.y as i64));
+        initial_scope.insert(
             "CURSOR_X".to_string(),
             Value::Int(cursor_relative_pos.x as i64),
         );
-        vars.insert(
+        initial_scope.insert(
             "CURSOR_Y".to_string(),
             Value::Int(cursor_relative_pos.y as i64),
         );
+
+        let mut scopes = vec![initial_scope];
 
         let mut funcs: HashMap<
             String,
@@ -367,8 +435,24 @@ impl ScriptAST {
             Box::new(move |s, span, args| paste_text_func(s, span, args, cs_tx)),
         );
 
+        let cs_tx_repeat = cs_tx.clone();
+        funcs.insert(
+            "repeat".to_string(),
+            Box::new(move |s, span, args| repeat_func(s, span, args, &cs_tx_repeat)),
+        );
+        funcs.insert(
+            "stop_repeat".to_string(),
+            Box::new(move |s, span, args| stop_repeat_func(s, span, args)),
+        );
+        funcs.insert(
+            "is_repeating".to_string(),
+            Box::new(move |s, span, args| is_repeating_func(s, span, args)),
+        );
+
+        let mut user_funcs = HashMap::new();
+
         for stmt in self.program.stmts.iter() {
-            self.eval_stmt(stmt, &mut vars, &funcs)?;
+            self.eval_stmt(stmt, &mut scopes, &funcs, &mut user_funcs)?;
         }
 
         Ok(())
@@ -377,25 +461,35 @@ impl ScriptAST {
     fn eval_stmt(
         &self,
         stmt: &Stmt,
-        vars: &mut HashMap<String, Value>,
+        scopes: &mut Vec<HashMap<String, Value>>,
         funcs: &HashMap<String, impl Fn(&str, &SourceSpan, &[Value]) -> Result<Value, ScriptError>>,
-    ) -> Result<(), ScriptError> {
+        user_funcs: &mut HashMap<String, UserFn>,
+    ) -> Result<Option<Value>, ScriptError> {
         match stmt {
             Stmt::Let { name, expr, span } => {
                 let val = self
-                    .eval_expr(expr, vars, funcs)
+                    .eval_expr(expr, scopes, funcs, user_funcs)
                     .map_err(|e| e.with_outer_span(span.clone(), &self.script))?;
-                vars.insert(name.clone(), val);
-                Ok(())
+                if let Some(scope) = scopes.last_mut() {
+                    scope.insert(name.clone(), val);
+                }
+                Ok(None)
             }
             Stmt::Assign { name, expr, span } => {
                 let val = self
-                    .eval_expr(expr, vars, funcs)
+                    .eval_expr(expr, scopes, funcs, user_funcs)
                     .map_err(|e| e.with_outer_span(span.clone(), &self.script))?;
 
-                if vars.contains_key(name) {
-                    vars.insert(name.clone(), val);
-                    Ok(())
+                let mut updated = false;
+                for scope in scopes.iter_mut().rev() {
+                    if scope.contains_key(name) {
+                        scope.insert(name.clone(), val.clone());
+                        updated = true;
+                        break;
+                    }
+                }
+                if updated {
+                    Ok(None)
                 } else {
                     Err(ScriptError::from_span(
                         span.clone(),
@@ -404,15 +498,17 @@ impl ScriptAST {
                     ))
                 }
             }
-            Stmt::Expr { expr, span } => match self.eval_expr(expr, vars, funcs) {
-                Ok(_) => Ok(()),
+            Stmt::Expr { expr, span } => match self.eval_expr(expr, scopes, funcs, user_funcs) {
+                Ok(_) => Ok(None),
                 Err(e) => Err(e.with_outer_span(span.clone(), &self.script)),
             },
             Stmt::Block { stmts, .. } => {
                 for stmt in stmts {
-                    self.eval_stmt(stmt, vars, funcs)?;
+                    if let Some(ret) = self.eval_stmt(stmt, scopes, funcs, user_funcs)? {
+                        return Ok(Some(ret));
+                    }
                 }
-                Ok(())
+                Ok(None)
             }
             Stmt::If {
                 condition,
@@ -421,31 +517,62 @@ impl ScriptAST {
                 span,
             } => {
                 let cond_val = self
-                    .eval_expr(condition, vars, funcs)
+                    .eval_expr(condition, scopes, funcs, user_funcs)
                     .map_err(|e| e.with_outer_span(span.clone(), &self.script))?;
 
                 if Self::is_truthy(&cond_val) {
-                    self.eval_stmt(then_block, vars, funcs)?;
+                    if let Some(ret) = self.eval_stmt(then_block, scopes, funcs, user_funcs)? {
+                        return Ok(Some(ret));
+                    }
                 } else if let Some(else_stmt) = else_block {
-                    self.eval_stmt(else_stmt.as_ref(), vars, funcs)?;
+                    if let Some(ret) = self.eval_stmt(else_stmt.as_ref(), scopes, funcs, user_funcs)? {
+                        return Ok(Some(ret));
+                    }
                 }
 
-                Ok(())
+                Ok(None)
             }
             Stmt::While {
                 condition,
                 body,
                 span,
             } => {
+                let mut iter_count = 0u64;
                 while {
                     let cond_val = self
-                        .eval_expr(condition, vars, funcs)
+                        .eval_expr(condition, scopes, funcs, user_funcs)
                         .map_err(|e| e.with_outer_span(span.clone(), &self.script))?;
                     Self::is_truthy(&cond_val)
                 } {
-                    self.eval_stmt(body, vars, funcs)?;
+                    iter_count += 1;
+                    if iter_count > 100_000 {
+                        return Err(ScriptError::from_span(
+                            span.clone(),
+                            &self.script,
+                            "Loop limit exceeded (100k iterations)".to_string(),
+                        ));
+                    }
+                    if let Some(ret) = self.eval_stmt(body, scopes, funcs, user_funcs)? {
+                        return Ok(Some(ret));
+                    }
                 }
-                Ok(())
+                Ok(None)
+            }
+            Stmt::FnDef { name, params, body, .. } => {
+                user_funcs.insert(name.clone(), UserFn {
+                    params: params.clone(),
+                    body: *body.clone(),
+                });
+                Ok(None)
+            }
+            Stmt::Return { expr, span } => {
+                let val = if let Some(e) = expr {
+                    self.eval_expr(e, scopes, funcs, user_funcs)
+                        .map_err(|e| e.with_outer_span(span.clone(), &self.script))?
+                } else {
+                    Value::Int(0)
+                };
+                Ok(Some(val))
             }
             Stmt::Error { .. } => unreachable!("Error statement reached"),
         }
@@ -498,16 +625,24 @@ impl ScriptAST {
     fn eval_expr(
         &self,
         expr: &Expr,
-        vars: &mut HashMap<String, Value>,
+        scopes: &mut Vec<HashMap<String, Value>>,
         funcs: &HashMap<String, impl Fn(&str, &SourceSpan, &[Value]) -> Result<Value, ScriptError>>,
+        user_funcs: &mut HashMap<String, UserFn>,
     ) -> Result<Value, ScriptError> {
         match expr {
             Expr::Number { value, .. } => Ok(Value::Int(*value)),
             Expr::Bool { value, .. } => Ok(Value::Bool(*value)),
             Expr::Str { value, .. } => Ok(Value::Str(value.clone())),
             Expr::Var { name, span } => {
-                if let Some(val) = vars.get(name) {
-                    Ok(val.clone())
+                let mut val = None;
+                for scope in scopes.iter().rev() {
+                    if let Some(v) = scope.get(name) {
+                        val = Some(v.clone());
+                        break;
+                    }
+                }
+                if let Some(v) = val {
+                    Ok(v)
                 } else {
                     Err(ScriptError::from_span(
                         span.clone(),
@@ -517,22 +652,52 @@ impl ScriptAST {
                 }
             }
             Expr::Call { name, args, span } => {
-                // build in funcs
+                let mut arg_values = Vec::new();
+                for arg in args {
+                    arg_values.push(self.eval_expr(arg, scopes, funcs, user_funcs)?);
+                }
+
                 if let Some(func) = self.build_in_funcs.get(name) {
-                    let mut arg_values = Vec::new();
-                    for arg in args {
-                        arg_values.push(self.eval_expr(arg, vars, funcs)?);
-                    }
                     func(&self.script, span, &arg_values)
                         .map_err(|e| e.with_outer_span(span.clone(), &self.script))
-                // custom funcs
                 } else if let Some(func) = funcs.get(name) {
-                    let mut arg_values = Vec::new();
-                    for arg in args {
-                        arg_values.push(self.eval_expr(arg, vars, funcs)?);
-                    }
                     func(&self.script, span, &arg_values)
                         .map_err(|e| e.with_outer_span(span.clone(), &self.script))
+                } else if let Some(user_fn) = user_funcs.get(name).cloned() {
+                    if scopes.len() > 64 {
+                        return Err(ScriptError::from_span(
+                            span.clone(),
+                            &self.script,
+                            "Recursion depth limit exceeded (max 64)".to_string(),
+                        ));
+                    }
+                    if arg_values.len() != user_fn.params.len() {
+                        return Err(ScriptError::from_span(
+                            span.clone(),
+                            &self.script,
+                            format!(
+                                "Function '{}' expects {} arguments, but got {}",
+                                name,
+                                user_fn.params.len(),
+                                arg_values.len()
+                            ),
+                        ));
+                    }
+
+                    let mut local_scope = HashMap::new();
+                    for (param_name, arg_val) in user_fn.params.iter().zip(arg_values.into_iter()) {
+                        local_scope.insert(param_name.clone(), arg_val);
+                    }
+
+                    scopes.push(local_scope);
+                    let result = self.eval_stmt(&user_fn.body, scopes, funcs, user_funcs);
+                    scopes.pop();
+
+                    match result {
+                        Ok(Some(ret_val)) => Ok(ret_val),
+                        Ok(None) => Ok(Value::Int(0)),
+                        Err(e) => Err(e),
+                    }
                 } else {
                     Err(ScriptError::from_span(
                         span.clone(),
@@ -542,7 +707,7 @@ impl ScriptAST {
                 }
             }
             Expr::Unary { op, rhs, span } => {
-                let rhs_val = self.eval_expr(rhs, vars, funcs)?;
+                let rhs_val = self.eval_expr(rhs, scopes, funcs, user_funcs)?;
                 match op {
                     UnaryOp::Plus => {
                         if Self::is_numeric_value(&rhs_val) {
@@ -557,7 +722,16 @@ impl ScriptAST {
                     }
                     UnaryOp::Minus => {
                         if Self::is_numeric_value(&rhs_val) {
-                            Ok(Value::Int(-Self::to_int_value(&rhs_val)))
+                            let val = Self::to_int_value(&rhs_val);
+                            if let Some(res) = val.checked_neg() {
+                                Ok(Value::Int(res))
+                            } else {
+                                Err(ScriptError::from_span(
+                                    span.clone(),
+                                    &self.script,
+                                    format!("Integer overflow in negation: -{}", val),
+                                ))
+                            }
                         } else {
                             Err(ScriptError::from_span(
                                 span.clone(),
@@ -570,8 +744,8 @@ impl ScriptAST {
                 }
             }
             Expr::Binary { lhs, op, rhs, span } => {
-                let lhs_val = self.eval_expr(lhs, vars, funcs)?;
-                let rhs_val = self.eval_expr(rhs, vars, funcs)?;
+                let lhs_val = self.eval_expr(lhs, scopes, funcs, user_funcs)?;
+                let rhs_val = self.eval_expr(rhs, scopes, funcs, user_funcs)?;
 
                 match op {
                     BinOp::Add => match (&lhs_val, &rhs_val) {
@@ -580,7 +754,15 @@ impl ScriptAST {
                             if Self::are_numeric_values(&lhs_val, &rhs_val) {
                                 let l = Self::to_int_value(&lhs_val);
                                 let r = Self::to_int_value(&rhs_val);
-                                Ok(Value::Int(l + r))
+                                if let Some(res) = l.checked_add(r) {
+                                    Ok(Value::Int(res))
+                                } else {
+                                    Err(ScriptError::from_span(
+                                        span.clone(),
+                                        &self.script,
+                                        format!("Integer overflow in addition: {} + {}", l, r),
+                                    ))
+                                }
                             } else {
                                 Err(ScriptError::from_span(
                                     span.clone(),
@@ -597,7 +779,15 @@ impl ScriptAST {
                         if Self::are_numeric_values(&lhs_val, &rhs_val) {
                             let l = Self::to_int_value(&lhs_val);
                             let r = Self::to_int_value(&rhs_val);
-                            Ok(Value::Int(l - r))
+                            if let Some(res) = l.checked_sub(r) {
+                                Ok(Value::Int(res))
+                            } else {
+                                Err(ScriptError::from_span(
+                                    span.clone(),
+                                    &self.script,
+                                    format!("Integer overflow/underflow in subtraction: {} - {}", l, r),
+                                ))
+                            }
                         } else {
                             Err(ScriptError::from_span(
                                 span.clone(),
@@ -613,7 +803,15 @@ impl ScriptAST {
                         if Self::are_numeric_values(&lhs_val, &rhs_val) {
                             let l = Self::to_int_value(&lhs_val);
                             let r = Self::to_int_value(&rhs_val);
-                            Ok(Value::Int(l * r))
+                            if let Some(res) = l.checked_mul(r) {
+                                Ok(Value::Int(res))
+                            } else {
+                                Err(ScriptError::from_span(
+                                    span.clone(),
+                                    &self.script,
+                                    format!("Integer overflow in multiplication: {} * {}", l, r),
+                                ))
+                            }
                         } else {
                             Err(ScriptError::from_span(
                                 span.clone(),
@@ -803,6 +1001,7 @@ impl ScriptAST {
         for stmt_pair in pair.into_inner() {
             match stmt_pair.as_rule() {
                 Rule::stmt => stmts.push(self.parse_stmt(stmt_pair, &mut errors)),
+                Rule::fn_def => stmts.push(self.parse_fn_def(stmt_pair, &mut errors)),
                 Rule::EOI => {}
                 _ => unreachable!(),
             }
@@ -810,10 +1009,53 @@ impl ScriptAST {
         Program { stmts, errors }
     }
 
+    fn parse_block(&self, pair: Pair<Rule>, errors: &mut Vec<ScriptError>) -> Stmt {
+        let span: SourceSpan = pair.as_span().into();
+        let mut stmts = Vec::new();
+        for inner_pair in pair.into_inner() {
+            match inner_pair.as_rule() {
+                Rule::stmt => stmts.push(self.parse_stmt(inner_pair, errors)),
+                Rule::fn_def => stmts.push(self.parse_fn_def(inner_pair, errors)),
+                _ => {}
+            }
+        }
+        Stmt::Block { stmts, span }
+    }
+
+    fn parse_fn_def(&self, pair: Pair<Rule>, errors: &mut Vec<ScriptError>) -> Stmt {
+        let span: SourceSpan = pair.as_span().into();
+        let mut inner = pair.into_inner();
+        let name = inner.next().unwrap().as_str().to_string();
+        
+        let next_pair = inner.next().unwrap();
+        let (params, body_pair) = match next_pair.as_rule() {
+            Rule::param_list => {
+                let mut params = Vec::new();
+                for param in next_pair.into_inner() {
+                    params.push(param.as_str().to_string());
+                }
+                let body = inner.next().unwrap();
+                (params, body)
+            }
+            Rule::block => {
+                (Vec::new(), next_pair)
+            }
+            _ => unreachable!(),
+        };
+
+        let body = self.parse_block(body_pair, errors);
+        Stmt::FnDef {
+            name,
+            params,
+            body: Box::new(body),
+            span,
+        }
+    }
+
     fn parse_stmt(&self, pair: Pair<Rule>, errors: &mut Vec<ScriptError>) -> Stmt {
         let span: SourceSpan = pair.as_span().into();
         let mut it = pair.into_inner();
-        let core = it.next().unwrap(); // let_stmt / assign_stmt / expr_stmt
+        let core = it.next().unwrap(); // let_stmt / assign_stmt / expr_stmt / return_stmt
 
         let rule: Rule = core.as_rule();
         match rule {
@@ -843,17 +1085,23 @@ impl ScriptAST {
                     }
                 }
             }
-            Rule::block => {
-                let mut stmts = Vec::new();
-                let span: SourceSpan = core.as_span().into();
-
-                for stmt_pair in core.into_inner() {
-                    if stmt_pair.as_rule() == Rule::stmt {
-                        stmts.push(self.parse_stmt(stmt_pair, errors));
+            Rule::return_stmt => {
+                let mut inner = core.into_inner();
+                let expr = if let Some(expr_pair) = inner.next() {
+                    match self.parse_expr(expr_pair) {
+                        Ok(e) => Some(e),
+                        Err(err) => {
+                            errors.push(err.with_outer_span(span, &self.script));
+                            return Stmt::Error { span };
+                        }
                     }
-                }
-
-                Stmt::Block { stmts, span }
+                } else {
+                    None
+                };
+                Stmt::Return { expr, span }
+            }
+            Rule::block => {
+                self.parse_block(core, errors)
             }
             Rule::while_stmt => {
                 let while_span: SourceSpan = core.as_span().into();
@@ -870,21 +1118,7 @@ impl ScriptAST {
 
                 let body_pair = inner.next().unwrap();
                 let body = match body_pair.as_rule() {
-                    Rule::block => {
-                        let mut stmts = Vec::new();
-                        let block_span: SourceSpan = body_pair.as_span().into();
-
-                        for stmt_pair in body_pair.into_inner() {
-                            if stmt_pair.as_rule() == Rule::stmt {
-                                stmts.push(self.parse_stmt(stmt_pair, errors));
-                            }
-                        }
-
-                        Stmt::Block {
-                            stmts,
-                            span: block_span,
-                        }
-                    }
+                    Rule::block => self.parse_block(body_pair, errors),
                     r => {
                         errors.push(
                             ScriptError::from_span(
@@ -919,21 +1153,7 @@ impl ScriptAST {
 
                 let then_pair = inner.next().unwrap();
                 let then_block = match then_pair.as_rule() {
-                    Rule::block => {
-                        let mut stmts = Vec::new();
-                        let block_span: SourceSpan = then_pair.as_span().into();
-
-                        for stmt_pair in then_pair.into_inner() {
-                            if stmt_pair.as_rule() == Rule::stmt {
-                                stmts.push(self.parse_stmt(stmt_pair, errors));
-                            }
-                        }
-
-                        Stmt::Block {
-                            stmts,
-                            span: block_span,
-                        }
-                    }
+                    Rule::block => self.parse_block(then_pair, errors),
                     r => {
                         errors.push(
                             ScriptError::from_span(
@@ -949,21 +1169,7 @@ impl ScriptAST {
 
                 let else_block = if let Some(else_pair) = inner.next() {
                     match else_pair.as_rule() {
-                        Rule::block => {
-                            let mut stmts = Vec::new();
-                            let block_span: SourceSpan = else_pair.as_span().into();
-
-                            for stmt_pair in else_pair.into_inner() {
-                                if stmt_pair.as_rule() == Rule::stmt {
-                                    stmts.push(self.parse_stmt(stmt_pair, errors));
-                                }
-                            }
-
-                            Some(Box::new(Stmt::Block {
-                                stmts,
-                                span: block_span,
-                            }))
-                        }
+                        Rule::block => Some(Box::new(self.parse_block(else_pair, errors))),
                         r => {
                             errors.push(ScriptError::from_span(
                                 else_pair.as_span().into(),
@@ -1388,24 +1594,20 @@ fn send_key_func(
     };
 
     if action == "default" {
-        cs_tx
-            .send(ScrcpyControlMsg::InjectKeycode {
-                action: KeyEventAction::Down,
-                keycode: keycode.clone(),
-                repeat: 0,
-                metastate: metastate.clone(),
-            })
-            .unwrap();
+        let _ = cs_tx.send(ScrcpyControlMsg::InjectKeycode {
+            action: KeyEventAction::Down,
+            keycode: keycode.clone(),
+            repeat: 0,
+            metastate: metastate.clone(),
+        });
     }
 
-    cs_tx
-        .send(ScrcpyControlMsg::InjectKeycode {
-            action: key_action,
-            keycode,
-            repeat: 0,
-            metastate,
-        })
-        .unwrap();
+    let _ = cs_tx.send(ScrcpyControlMsg::InjectKeycode {
+        action: key_action,
+        keycode,
+        repeat: 0,
+        metastate,
+    });
 
     Ok(Value::Int(0))
 }
@@ -1432,15 +1634,192 @@ fn paste_text_func(
 
     let sequence = rand::random::<u64>();
 
-    cs_tx
-        .send(ScrcpyControlMsg::SetClipboard {
-            sequence,
-            paste: true,
-            text: text.clone(),
-        })
-        .unwrap();
+    let _ = cs_tx.send(ScrcpyControlMsg::SetClipboard {
+        sequence,
+        paste: true,
+        text: text.clone(),
+    });
 
     Ok(Value::Int(0))
+}
+
+pub fn start_repeat(
+    key_name: String,
+    interval: u64,
+    cs_tx: &broadcast::Sender<ScrcpyControlMsg>,
+) -> Result<(), String> {
+    let keycode = match serde_json::from_str::<Keycode>(&format!("\"{}\"", key_name)) {
+        Ok(k) => k,
+        Err(_) => return Err(format!("Invalid key name '{}'", key_name)),
+    };
+
+    // Stop any existing repeat for this key first
+    {
+        let mut repeats = ACTIVE_REPEATS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(sender) = repeats.remove(&key_name) {
+            let _ = sender.send(());
+        }
+    }
+
+    // Create a stop channel
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+
+    // Spawn the thread
+    let cs_tx_clone = cs_tx.clone();
+    let keycode_clone = keycode.clone();
+    std::thread::spawn(move || {
+        loop {
+            let _ = cs_tx_clone.send(ScrcpyControlMsg::InjectKeycode {
+                action: KeyEventAction::Down,
+                keycode: keycode_clone.clone(),
+                repeat: 0,
+                metastate: MetaState::NONE,
+            });
+            let _ = cs_tx_clone.send(ScrcpyControlMsg::InjectKeycode {
+                action: KeyEventAction::Up,
+                keycode: keycode_clone.clone(),
+                repeat: 0,
+                metastate: MetaState::NONE,
+            });
+
+            // Wait for interval, check if stopped
+            match rx.recv_timeout(std::time::Duration::from_millis(interval)) {
+                Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    break;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // Continue loop
+                }
+            }
+        }
+    });
+
+    let mut repeats = ACTIVE_REPEATS.lock().unwrap_or_else(|e| e.into_inner());
+    repeats.insert(key_name, tx);
+    Ok(())
+}
+
+pub fn stop_repeat(key_name: &str) {
+    let mut repeats = ACTIVE_REPEATS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(sender) = repeats.remove(key_name) {
+        let _ = sender.send(());
+    }
+}
+
+pub fn is_repeating(key_name: &str) -> bool {
+    let repeats = ACTIVE_REPEATS.lock().unwrap_or_else(|e| e.into_inner());
+    repeats.contains_key(key_name)
+}
+
+fn repeat_func(
+    source: &str,
+    span: &SourceSpan,
+    args: &[Value],
+    cs_tx: &broadcast::Sender<ScrcpyControlMsg>,
+) -> Result<Value, ScriptError> {
+    if args.len() != 2 {
+        return Err(ScriptError::from_span(
+            span.clone(),
+            source,
+            "The repeat function takes two arguments: key_name (string) and interval (int)".to_string(),
+        ));
+    }
+    let key_name = match &args[0] {
+        Value::Str(s) => s.clone(),
+        _ => {
+            return Err(ScriptError::from_span(
+                span.clone(),
+                source,
+                "First argument to repeat must be a string (key_name)".to_string(),
+            ));
+        }
+    };
+    let interval = match args[1] {
+        Value::Int(i) => {
+            if i <= 0 {
+                return Err(ScriptError::from_span(
+                    span.clone(),
+                    source,
+                    "Second argument to repeat must be a positive integer".to_string(),
+                ));
+            }
+            i as u64
+        }
+        _ => {
+            return Err(ScriptError::from_span(
+                span.clone(),
+                source,
+                "Second argument to repeat must be an integer (interval in ms)".to_string(),
+            ));
+        }
+    };
+
+    start_repeat(key_name, interval, cs_tx).map_err(|e| {
+        ScriptError::from_span(span.clone(), source, e)
+    })?;
+
+    Ok(Value::Int(0))
+}
+
+fn stop_repeat_func(
+    source: &str,
+    span: &SourceSpan,
+    args: &[Value],
+) -> Result<Value, ScriptError> {
+    if args.len() != 1 {
+        return Err(ScriptError::from_span(
+            span.clone(),
+            source,
+            "The stop_repeat function takes one argument: key_name (string)".to_string(),
+        ));
+    }
+    let key_name = match &args[0] {
+        Value::Str(s) => s.as_str(),
+        _ => {
+            return Err(ScriptError::from_span(
+                span.clone(),
+                source,
+                "Argument to stop_repeat must be a string (key_name)".to_string(),
+            ));
+        }
+    };
+
+    stop_repeat(key_name);
+    Ok(Value::Int(0))
+}
+
+fn is_repeating_func(
+    source: &str,
+    span: &SourceSpan,
+    args: &[Value],
+) -> Result<Value, ScriptError> {
+    if args.len() != 1 {
+        return Err(ScriptError::from_span(
+            span.clone(),
+            source,
+            "The is_repeating function takes one argument: key_name (string)".to_string(),
+        ));
+    }
+    let key_name = match &args[0] {
+        Value::Str(s) => s.as_str(),
+        _ => {
+            return Err(ScriptError::from_span(
+                span.clone(),
+                source,
+                "Argument to is_repeating must be a string (key_name)".to_string(),
+            ));
+        }
+    };
+
+    let repeating = is_repeating(key_name);
+    Ok(Value::Bool(repeating))
+}
+
+pub fn clear_all_repeats() {
+    let mut repeats = ACTIVE_REPEATS.lock().unwrap_or_else(|e| e.into_inner());
+    for (_, sender) in repeats.drain() {
+        let _ = sender.send(());
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1649,6 +2028,16 @@ pub enum Stmt {
     While {
         condition: Expr,
         body: Box<Stmt>, // Block
+        span: SourceSpan,
+    },
+    FnDef {
+        name: String,
+        params: Vec<String>,
+        body: Box<Stmt>, // Block
+        span: SourceSpan,
+    },
+    Return {
+        expr: Option<Expr>,
         span: SourceSpan,
     },
     Error {

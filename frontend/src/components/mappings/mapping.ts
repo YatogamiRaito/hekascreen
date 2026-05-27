@@ -20,7 +20,8 @@ export type MappingType =
   | FpsConfig
   | FireConfig
   | RawInputConfig
-  | ScriptConfig;
+  | ScriptConfig
+  | AutoRepeatConfig;
 
 export type Position = {
   x: number;
@@ -361,6 +362,26 @@ export function newScript(position: Position): ScriptConfig {
     held_script: "",
     interval: 300,
     type: "Script",
+  };
+}
+
+export interface AutoRepeatConfig {
+  bind: ButtonBinding;
+  note: string;
+  position: Position;
+  target_key: string;
+  interval: number;
+  type: "AutoRepeat";
+}
+
+export function newAutoRepeat(position: Position): AutoRepeatConfig {
+  return {
+    bind: [],
+    note: "",
+    position,
+    target_key: "5",
+    interval: 1500,
+    type: "AutoRepeat",
   };
 }
 

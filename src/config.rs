@@ -85,7 +85,7 @@ impl Default for LocalConfig {
             video_bit_rate: 16_000000, // 16M
             video_max_size: 1920,      // default 1920
             video_max_fps: 60,         // default 60
-            present_mode: "AutoVsync".to_string(),
+            present_mode: "Mailbox".to_string(),
             video_codec_options: "".to_string(),
             video_low_latency: true,
             video_realtime_priority: true,
@@ -103,7 +103,7 @@ macro_rules! define_setter {
         paste! {
             $(
                 pub fn [<set_ $field>] (value: $typ) {
-                    CONFIG.write().unwrap().$field = value;
+                    CONFIG.write().unwrap_or_else(|e| e.into_inner()).$field = value;
                     Self::save().unwrap();
                 }
             )*
@@ -184,7 +184,39 @@ impl LocalConfig {
             migrated = true;
         }
 
-        *CONFIG.write().unwrap() = config;
+        // Validate values and reset to safe defaults if invalid
+        if config.web_port == 0 {
+            config.web_port = 27799;
+            migrated = true;
+            eprintln!("[HekaScreen] Config validation: web_port cannot be 0, reset to 27799");
+        }
+        if config.controller_port == 0 {
+            config.controller_port = 27798;
+            migrated = true;
+            eprintln!("[HekaScreen] Config validation: controller_port cannot be 0, reset to 27798");
+        }
+        if config.video_bit_rate == 0 {
+            config.video_bit_rate = 16_000_000;
+            migrated = true;
+            eprintln!("[HekaScreen] Config validation: video_bit_rate cannot be 0, reset to 16,000,000");
+        }
+        if config.mapping_label_opacity < 0.0 || config.mapping_label_opacity > 1.0 {
+            config.mapping_label_opacity = 0.3;
+            migrated = true;
+            eprintln!("[HekaScreen] Config validation: mapping_label_opacity out of range, reset to 0.3");
+        }
+        if !matches!(config.language.as_str(), "zh-CN" | "en-US" | "tr-TR") {
+            config.language = "en-US".to_string();
+            migrated = true;
+            eprintln!("[HekaScreen] Config validation: invalid language, reset to en-US");
+        }
+        if !matches!(config.present_mode.as_str(), "AutoVsync" | "AutoNoVsync" | "Immediate" | "Mailbox") {
+            config.present_mode = "Mailbox".to_string();
+            migrated = true;
+            eprintln!("[HekaScreen] Config validation: invalid present_mode, reset to Mailbox");
+        }
+
+        *CONFIG.write().unwrap_or_else(|e| e.into_inner()) = config;
 
         if migrated {
             if let Err(e) = Self::save() {
@@ -196,11 +228,11 @@ impl LocalConfig {
     }
 
     pub fn get() -> LocalConfig {
-        CONFIG.read().unwrap().clone()
+        CONFIG.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn get_clipboard_sync() -> bool {
-        CONFIG.read().unwrap().clipboard_sync
+        CONFIG.read().unwrap_or_else(|e| e.into_inner()).clipboard_sync
     }
 
     define_setter!(
