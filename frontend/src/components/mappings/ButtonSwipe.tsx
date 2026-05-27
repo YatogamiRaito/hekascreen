@@ -64,7 +64,7 @@ export default function ButtonSwipe({
   useEffect(() => {
     const element = document.getElementById(id);
     if (element) {
-      const position = config.positions[0];
+      const position = config.positions[0]!;
       element.style.transform = mappingButtonTransformStyle(
         position.x,
         position.y,
@@ -179,8 +179,8 @@ function Background({
           if (index === positions.length - 1) return null;
           const { x: x1, y: y1 } = mappingButtonPosition(pos.x, pos.y, scale);
           const { x: x2, y: y2 } = mappingButtonPosition(
-            positions[index + 1].x,
-            positions[index + 1].y,
+            positions[index + 1]!.x,
+            positions[index + 1]!.y,
             scale
           );
 
@@ -387,8 +387,8 @@ function PositonEditor({
             if (index === positions.length - 1) return null;
             const { x: x1, y: y1 } = mappingButtonPosition(pos.x, pos.y, scale);
             const { x: x2, y: y2 } = mappingButtonPosition(
-              positions[index + 1].x,
-              positions[index + 1].y,
+              positions[index + 1]!.x,
+              positions[index + 1]!.y,
               scale
             );
 

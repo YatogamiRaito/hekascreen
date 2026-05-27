@@ -429,7 +429,7 @@ const mappingConstructorMap: any = Object.fromEntries(
   ]),
 );
 
-const menuItems = buttonTypes.map((key) => [
+const menuItems: [string, string][] = buttonTypes.map((key) => [
   key,
   `mappings.${key.charAt(0).toLowerCase() + key.slice(1)}.name`,
 ]);
@@ -549,7 +549,7 @@ function Displayer({
       if (prev === null) return null;
       const newState = { ...prev };
       newState.edited = true;
-      newState.current.mappings.push(newState.current.mappings[index]);
+      newState.current.mappings.push(newState.current.mappings[index]!);
 
       return newState;
     });

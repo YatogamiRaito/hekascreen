@@ -73,7 +73,7 @@ export default function ButtonMultipleTap({
   useEffect(() => {
     const element = document.getElementById(id);
     if (element) {
-      const position = config.items[0].position;
+      const position = config.items[0]!.position;
       element.style.transform = mappingButtonTransformStyle(
         position.x,
         position.y,
@@ -89,7 +89,7 @@ export default function ButtonMultipleTap({
       const newConfig = {
         ...config,
       };
-      newConfig.items[0].position = {
+      newConfig.items[0]!.position = {
         x,
         y,
       };

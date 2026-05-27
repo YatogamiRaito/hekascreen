@@ -182,10 +182,11 @@ function mappingButtonBindFactory(
     e.preventDefault();
     if (!pressedKeys.has(e.code)) {
       if (e.code in EVENT_CODE_TO_KEY_CODE) {
-        pressedKeys.add(
-          EVENT_CODE_TO_KEY_CODE[e.code as keyof typeof EVENT_CODE_TO_KEY_CODE]
-        );
-        onBindChange([...pressedKeys]);
+        const key = EVENT_CODE_TO_KEY_CODE[e.code as keyof typeof EVENT_CODE_TO_KEY_CODE];
+        if (key) {
+          pressedKeys.add(key);
+          onBindChange([...pressedKeys]);
+        }
       } else {
         console.warn("Unknow keycode: ", e.code);
       }
@@ -195,9 +196,10 @@ function mappingButtonBindFactory(
   const handleKeyUp = (e: KeyboardEvent) => {
     e.preventDefault();
     if (e.code in EVENT_CODE_TO_KEY_CODE) {
-      pressedKeys.delete(
-        EVENT_CODE_TO_KEY_CODE[e.code as keyof typeof EVENT_CODE_TO_KEY_CODE]
-      );
+      const key = EVENT_CODE_TO_KEY_CODE[e.code as keyof typeof EVENT_CODE_TO_KEY_CODE];
+      if (key) {
+        pressedKeys.delete(key);
+      }
     }
   };
 
@@ -210,7 +212,7 @@ function mappingButtonBindFactory(
 
     const key =
       e.button >= 0 && e.button < MOUSE_BUTTONS.length
-        ? MOUSE_BUTTONS[e.button]
+        ? MOUSE_BUTTONS[e.button]!
         : `M-Other-${e.button}`;
     pressedKeys.add(key);
     onBindChange([...pressedKeys]);
@@ -220,7 +222,7 @@ function mappingButtonBindFactory(
     e.preventDefault();
     const key =
       e.button >= 0 && e.button < MOUSE_BUTTONS.length
-        ? MOUSE_BUTTONS[e.button]
+        ? MOUSE_BUTTONS[e.button]!
         : `M-Other-${e.button}`;
 
     pressedKeys.delete(key);

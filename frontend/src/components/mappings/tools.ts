@@ -124,8 +124,8 @@ export function mappingModalDragFactory(delay?: number) {
     const match = element.style.transform.match(
       /translate\((-?\d+)px,\s*(-?\d+)px\)/,
     );
-    const oldTX = match ? parseInt(match[1]) : 0;
-    const oldTY = match ? parseInt(match[2]) : 0;
+    const oldTX = match && match[1] ? parseInt(match[1]) : 0;
+    const oldTY = match && match[2] ? parseInt(match[2]) : 0;
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       cX = moveEvent.pageX;
