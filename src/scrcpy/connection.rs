@@ -26,7 +26,7 @@ use crate::{
             VideoMsg, read_media_packet,
         },
     },
-    utils::share::ControlledDevice,
+    utils::{mask_win_move_helper, share::ControlledDevice},
 };
 
 pub struct ScrcpyConnection {
@@ -74,6 +74,7 @@ impl ScrcpyConnection {
         token: CancellationToken,
         mut cs_rx: broadcast::Receiver<ScrcpyControlMsg>,
         mut watch_rx: watch::Receiver<(u32, u32)>,
+        scid: String,
     ) {
         tokio::select! {
             _ = token.cancelled()=>{
@@ -96,11 +97,23 @@ impl ScrcpyConnection {
                                         action_button: _,
                                         buttons: _,
                                     } => {
-                                        let (device_w, device_h) = watch_rx.borrow_and_update().clone();
+                                        let mut device_w = 0;
+                                        let mut device_h = 0;
+                                        if let Some((dw, dh)) = ControlledDevice::get_device_size(&scid).await {
+                                            device_w = dw;
+                                            device_h = dh;
+                                        }
+                                        if device_w == 0 || device_h == 0 {
+                                            let (dw, dh) = watch_rx.borrow_and_update().clone();
+                                            device_w = dw;
+                                            device_h = dh;
+                                        }
                                         let (old_x, old_y) = (*x, *y);
                                         let (old_w, old_h) = (*w, *h);
-                                        *x = old_x * device_w as i32 / old_w as i32;
-                                        *y = old_y * device_h as i32 / old_h as i32;
+                                        if old_w > 0 && old_h > 0 {
+                                            *x = old_x * device_w as i32 / old_w as i32;
+                                            *y = old_y * device_h as i32 / old_h as i32;
+                                        }
                                         *w = device_w as u16;
                                         *h = device_h as u16;
                                     }
@@ -113,23 +126,41 @@ impl ScrcpyConnection {
                                         vscroll: _,
                                         buttons: _,
                                     } => {
-                                        let (device_w, device_h) = watch_rx.borrow_and_update().clone();
+                                        let mut device_w = 0;
+                                        let mut device_h = 0;
+                                        if let Some((dw, dh)) = ControlledDevice::get_device_size(&scid).await {
+                                            device_w = dw;
+                                            device_h = dh;
+                                        }
+                                        if device_w == 0 || device_h == 0 {
+                                            let (dw, dh) = watch_rx.borrow_and_update().clone();
+                                            device_w = dw;
+                                            device_h = dh;
+                                        }
                                         let (old_x, old_y) = (*x, *y);
                                         let (old_w, old_h) = (*w, *h);
-                                        *x = old_x * device_w as i32 / old_w as i32;
-                                        *y = old_y * device_h as i32 / old_h as i32;
+                                        if old_w > 0 && old_h > 0 {
+                                            *x = old_x * device_w as i32 / old_w as i32;
+                                            *y = old_y * device_h as i32 / old_h as i32;
+                                        }
                                         *w = device_w as u16;
                                         *h = device_h as u16;
                                     }
                                     _ => {}
                                 };
-                                let data:Vec<u8> = msg.into();
-                                if let Err(e) = write_half.write_all(&data).await {
-                                    log::error!("[Controller] {}: {}", t!("scrcpy.controlConnWriteFailed"),e);
-                                }
+                                 let data:Vec<u8> = msg.into();
+                                 if let Err(e) = write_half.write_all(&data).await {
+                                     log::error!("[Controller] {}: {}", t!("scrcpy.controlConnWriteFailed"),e);
+                                 } else {
+                                     let now = std::time::SystemTime::now()
+                                         .duration_since(std::time::UNIX_EPOCH)
+                                         .unwrap_or_default()
+                                         .as_micros() as u64;
+                                     crate::utils::LAST_INPUT_TIME_MICROS.store(now, std::sync::atomic::Ordering::Relaxed);
+                                 }
                         }
                         Err(RecvError::Lagged(skipped)) => {
-                            log::warn!("[Controller] {}",t!("controller.csReceiverLagged", skipped => skipped));
+                             log::warn!("[Controller] {}",t!("controller.csReceiverLagged", skipped => skipped));
                         }
                         Err(e) => {
                             log::info!("[Controller] {}: {}", t!("scrcpy.controlChannelClosed"),e);
@@ -164,11 +195,14 @@ impl ScrcpyConnection {
                     } = msg.clone()
                     {
                         ControlledDevice::update_device_size(scid, (width, height)).await;
-                        watch_tx.send((width, height)).unwrap();
+                        let _ = watch_tx.send((width, height));
                     }
                     // only forward other message from main device
                     if main {
-                        cr_tx.send(msg).unwrap();
+                        if let Err(e) = cr_tx.send(msg) {
+                            log::warn!("[Controller] Device message receiver dropped: {}", e);
+                            break;
+                        }
                     }
                 }
                 Err(e) => {
@@ -223,32 +257,42 @@ impl ScrcpyConnection {
         let (watch_tx, watch_rx) = watch::channel::<(u32, u32)>((0, 0)); // share device size with writer
         if main {
             let (oneshot_tx, oneshot_rx) = oneshot::channel::<Result<String, String>>();
-            m_tx.send((
+            if let Err(e) = m_tx.send((
                 MaskCommand::DeviceConnectionChange { connect: true },
                 oneshot_tx,
-            ))
-            .unwrap();
-            oneshot_rx.await.unwrap().unwrap();
+            )) {
+                log::error!("[Controller] Failed to send DeviceConnectionChange connect: {}", e);
+            } else {
+                let _ = oneshot_rx.await;
+            }
         }
 
         tokio::select! {
-            _ = Self::control_writer(write_half, token, cs_rx, watch_rx) => {finnal_token.cancel();}
+            _ = Self::control_writer(write_half, token, cs_rx, watch_rx, scid.clone()) => {finnal_token.cancel();}
             _ = Self::control_reader(read_half, token_copy, cr_tx, watch_tx, &scid, main) => {finnal_token.cancel();}
         }
 
         log::info!("[Controller] {}", t!("scrcpy.controlConnectionClosed"));
         if main {
             let (oneshot_tx, oneshot_rx) = oneshot::channel::<Result<String, String>>();
-            m_tx.send((
+            if let Err(e) = m_tx.send((
                 MaskCommand::DeviceConnectionChange { connect: false },
                 oneshot_tx,
-            ))
-            .unwrap();
-            oneshot_rx.await.unwrap().unwrap();
+            )) {
+                log::error!("[Controller] Failed to send DeviceConnectionChange disconnect: {}", e);
+            } else {
+                let _ = oneshot_rx.await;
+            }
         }
     }
 
-    async fn video_handler(&mut self, v_tx: crossbeam_channel::Sender<VideoMsg>) {
+    async fn video_handler(
+        &mut self,
+        v_tx: crossbeam_channel::Sender<VideoMsg>,
+        m_tx: crossbeam_channel::Sender<(MaskCommand, oneshot::Sender<Result<String, String>>)>,
+        scid: &str,
+        recycle_rx: crossbeam_channel::Receiver<Vec<u8>>,
+    ) {
         // read metadata
         let mut buf: [u8; 12] = [0; 12];
         let mut video_decoder = match self.socket.read_exact(&mut buf).await {
@@ -258,8 +302,27 @@ impl ScrcpyConnection {
             }
             Ok(_) => {
                 let raw_codec_id = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
-                let width = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
-                let height = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
+                let val2 = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
+                let val3 = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
+
+                let (width, height) = if (val2 & 0x80000000) != 0 {
+                    // New v3.0+ SessionMeta format (16 bytes total: codec_id, flags, width, height)
+                    let mut height_buf: [u8; 4] = [0; 4];
+                    if let Err(e) = self.socket.read_exact(&mut height_buf).await {
+                        log::error!("[Controller] Failed to read video height: {}", e);
+                        return;
+                    }
+                    let width = val3;
+                    let height = u32::from_be_bytes(height_buf);
+                    (width, height)
+                } else {
+                    // Old v2.x format (12 bytes total: codec_id, width, height)
+                    let width = val2;
+                    let height = val3;
+                    (width, height)
+                };
+
+                log::info!("[Controller] Video dimensions: {}x{}", width, height);
 
                 let codec_id = match raw_codec_id {
                     SC_CODEC_ID_H264 => {
@@ -284,14 +347,35 @@ impl ScrcpyConnection {
                     }
                 };
                 let video_decoder = VideoDecoder::new(codec_id, width, height);
+
+                // Send stream-info once so the HUD can show ground-truth status
+                // (hw_active reflects whether VAAPI actually initialized, not just
+                //  whether hw_decode is enabled in settings).
+                let _ = v_tx.send(VideoMsg::StreamInfo {
+                    codec: format!("{}", codec_id),
+                    hw_active: video_decoder.hw_active(),
+                    width,
+                    height,
+                });
+
+                let scid_str = scid.to_string();
+                let m_tx_copy = m_tx.clone();
+                tokio::spawn(async move {
+                    ControlledDevice::update_device_size(scid_str, (width, height)).await;
+                    mask_win_move_helper(width, height, &m_tx_copy).await;
+                });
                 video_decoder
             }
         };
 
         // read video packets
+        let mut frame_count: u64 = 0;
         loop {
             match read_media_packet(&mut self.socket).await {
                 Ok(mut packet) => {
+                    frame_count += 1;
+                    let is_config = packet.pts().is_none();
+
                     if video_decoder.must_merge_config {
                         // merge config packet if needed
                         video_decoder.packet_merger.merge(&mut packet);
@@ -299,30 +383,83 @@ impl ScrcpyConnection {
 
                     // no send config packet
                     if packet.pts().is_some() {
-                        let decoded = {
-                            let mut decoded = frame::Video::empty();
-                            video_decoder.decoder.send_packet(&mut packet).unwrap();
-                            video_decoder.decoder.receive_frame(&mut decoded).unwrap();
-                            decoded
-                        };
+                        let decode_start = std::time::Instant::now();
+                        if let Err(e) = video_decoder.decoder.send_packet(&mut packet) {
+                            log::warn!("[Controller] Failed to send packet to decoder: {} (frame_count={})", e, frame_count);
+                            continue;
+                        }
+                        let mut decoded = frame::Video::empty();
+                        match video_decoder.decoder.receive_frame(&mut decoded) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                log::warn!("[Controller] No frame yet from decoder: {} (frame_count={}, decoder_size={}x{})", e, frame_count, video_decoder.width, video_decoder.height);
+                                continue;
+                            }
+                        }
                         // update size after decoding video packet
-                        video_decoder.update();
+                        let decoded_w = decoded.width();
+                        let decoded_h = decoded.height();
+                        // save size before update() so we can detect a real change
+                        // (update() also returns true on first frame because scaler is None,
+                        //  which would duplicate the WinMove already sent from metadata)
+                        let pre_w = video_decoder.width;
+                        let pre_h = video_decoder.height;
+                        if video_decoder.update(&decoded) {
+                            let new_w = video_decoder.width;
+                            let new_h = video_decoder.height;
+                            if new_w != pre_w || new_h != pre_h {
+                                log::info!("[Controller] Video size changed: {}x{} -> {}x{} (frame_count={})",
+                                    pre_w, pre_h, new_w, new_h, frame_count);
+                                let scid_str = scid.to_string();
+                                let m_tx_copy = m_tx.clone();
+                                tokio::spawn(async move {
+                                    ControlledDevice::update_device_size(scid_str, (new_w, new_h)).await;
+                                    mask_win_move_helper(new_w, new_h, &m_tx_copy).await;
+                                });
+                            } else {
+                                log::info!("[Controller] Scaler initialized {}x{} (frame_count={})",
+                                    new_w, new_h, frame_count);
+                                _ = decoded_w; // suppress unused warning
+                                _ = decoded_h;
+                            }
+                        }
 
                         let rgb_frame = video_decoder.conver_to_rgba(&decoded);
-                        let mut buf = Vec::with_capacity(video_decoder.frame_size);
-                        buf.resize(video_decoder.frame_size, 0);
+                        let decode_elapsed_ms = decode_start.elapsed().as_secs_f32() * 1000.0;
+                        let mut buf = match recycle_rx.try_recv() {
+                            Ok(mut b) => {
+                                b.resize(video_decoder.frame_size, 0);
+                                b
+                            }
+                            Err(_) => {
+                                let mut b = Vec::with_capacity(video_decoder.frame_size);
+                                b.resize(video_decoder.frame_size, 0);
+                                b
+                            }
+                        };
                         buf.copy_from_slice(rgb_frame.data(0));
 
-                        v_tx.send(VideoMsg::Data {
+                        let timestamp_us = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_micros() as u64;
+
+                        if let Err(e) = v_tx.send(VideoMsg::Data {
                             data: buf,
                             width: video_decoder.width,
                             height: video_decoder.height,
-                        })
-                        .unwrap();
+                            decode_time_ms: decode_elapsed_ms,
+                            timestamp_us,
+                        }) {
+                            log::warn!("[Controller] Video receiver dropped, stopping video loop: {}", e);
+                            break;
+                        }
+                    } else {
+                        log::info!("[Controller] Config packet received (frame_count={}, is_config={})", frame_count, is_config);
                     }
                 }
                 Err(e) => {
-                    log::error!("[Controller] {}", e);
+                    log::error!("[Controller] Video read error: {} (frame_count={})", e, frame_count);
                     break;
                 }
             }
@@ -333,8 +470,10 @@ impl ScrcpyConnection {
         mut self,
         token: CancellationToken,
         v_tx: crossbeam_channel::Sender<VideoMsg>,
+        m_tx: crossbeam_channel::Sender<(MaskCommand, oneshot::Sender<Result<String, String>>)>,
         meta_flag: bool,
         scid: &str,
+        recycle_rx: crossbeam_channel::Receiver<Vec<u8>>,
     ) {
         log::info!("[Controller] {}", t!("scrcpy.handleVideoConnection"));
         if meta_flag {
@@ -351,12 +490,12 @@ impl ScrcpyConnection {
             _ = token.cancelled()=>{
                 log::info!("[Controller] {}", t!("scrcpy.videoConnectionReaderCancelled"));
             }
-            _ = self.video_handler(v_tx.clone())=>{
+            _ = self.video_handler(v_tx.clone(), m_tx, scid, recycle_rx)=>{
                 log::error!("[Controller] {}", t!("scrcpy.videoReadShutdownUnexpectedly"));
                 finnal_token.cancel();
             }
         }
-        v_tx.send(VideoMsg::Close).unwrap();
+        let _ = v_tx.send(VideoMsg::Close);
         log::info!("[Controller] {}", t!("scrcpy.videoConnectionClosed"));
         self.socket.shutdown().await.unwrap();
     }

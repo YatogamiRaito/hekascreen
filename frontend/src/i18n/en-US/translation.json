@@ -282,7 +282,26 @@
     "videoMaxSize": "Video max size",
     "zeroUnlimitedTip": "Set to 0 for unlimited",
     "videoMaxFps": "Video max FPS",
+    "presentMode": "Bevy Presentation Mode",
+    "presentModeTip": "Configures Bevy's window presentation mode. Mailbox or AutoNoVsync minimizes window rendering latency.",
+    "presentModeOptions": {
+      "AutoVsync": "VSync Enabled (AutoVsync)",
+      "AutoNoVsync": "VSync Disabled (AutoNoVsync)",
+      "Immediate": "Immediate (Lowest latency, screen tearing)",
+      "Mailbox": "Mailbox (Fast VSync, ultra-low latency, no tearing)"
+    },
+    "videoCodecOptions": "Video Codec Options",
+    "videoCodecOptionsTip": "Custom format options for the Android hardware video encoder (e.g. latency=0,priority=0 or vendor.qti-ext-enc-low-latency.enable=1 on Snapdragon).",
+    "lowLatencyParams": "Low Latency Optimizations",
+    "lowLatencyParamsOptions": {
+      "lowLatency": "Standard Low Latency Mode",
+      "realtimePriority": "Real-time Encoder Priority",
+      "qcomLowLatency": "Snapdragon Hardware Optimization",
+      "intraRefresh": "Intra-Refresh Mode"
+    },
     "alwaysOnTop": "Mask always on top",
+    "showDiagnostics": "Show Diagnostics HUD",
+    "hwDecode": "Hardware Decoding (VAAPI)",
     "openDataPath": "Open data path",
     "about": {
       "title": "About",

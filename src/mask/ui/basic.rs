@@ -1,4 +1,3 @@
-use std::time::Duration;
 
 /// Bevy basic plugin that creates a window with a transparent background and a border.
 use bevy::{
@@ -17,7 +16,7 @@ impl Plugin for BasicPlugin {
             .insert_resource(ClearColor(Color::NONE))
             .insert_resource(WinitSettings {
                 focused_mode: UpdateMode::Continuous,
-                unfocused_mode: UpdateMode::reactive_low_power(Duration::from_millis(100)),
+                unfocused_mode: UpdateMode::Continuous,
             })
             .add_systems(Startup, (setup, border.after(setup)));
     }

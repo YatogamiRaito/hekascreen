@@ -54,6 +54,14 @@ export interface LocalConfigState {
   videoBitRate: number;
   videoMaxSize: number;
   videoMaxFps: number;
+  presentMode: string;
+  videoCodecOptions: string;
+  videoLowLatency: boolean;
+  videoRealtimePriority: boolean;
+  videoQcomLowLatency: boolean;
+  videoIntraRefresh: boolean;
+  showDiagnostics: boolean;
+  hwDecode: boolean;
 }
 
 const initialState: LocalConfigState = {
@@ -69,10 +77,18 @@ const initialState: LocalConfigState = {
   mappingLabelOpacity: 0,
   language: "en-US",
   clipboardSync: true,
-  videoCodec: "H264",
-  videoBitRate: 8000000,
-  videoMaxSize: 0,
-  videoMaxFps: 0
+  videoCodec: "H265",
+  videoBitRate: 16000000,
+  videoMaxSize: 1920,
+  videoMaxFps: 60,
+  presentMode: "AutoVsync",
+  videoCodecOptions: "",
+  videoLowLatency: true,
+  videoRealtimePriority: true,
+  videoQcomLowLatency: false,
+  videoIntraRefresh: false,
+  showDiagnostics: true,
+  hwDecode: false,
 };
 
 const localConfigSlice = createSlice({
@@ -152,6 +168,38 @@ const localConfigSlice = createSlice({
       state.videoMaxFps = action.payload;
       updateLocalConfig("video_max_fps", action.payload);
     },
+    setPresentMode: (state, action: PayloadAction<string>) => {
+      state.presentMode = action.payload;
+      updateLocalConfig("present_mode", action.payload);
+    },
+    setVideoCodecOptions: (state, action: PayloadAction<string>) => {
+      state.videoCodecOptions = action.payload;
+      updateLocalConfig("video_codec_options", action.payload, 1000);
+    },
+    setVideoLowLatency: (state, action: PayloadAction<boolean>) => {
+      state.videoLowLatency = action.payload;
+      updateLocalConfig("video_low_latency", action.payload);
+    },
+    setVideoRealtimePriority: (state, action: PayloadAction<boolean>) => {
+      state.videoRealtimePriority = action.payload;
+      updateLocalConfig("video_realtime_priority", action.payload);
+    },
+    setVideoQcomLowLatency: (state, action: PayloadAction<boolean>) => {
+      state.videoQcomLowLatency = action.payload;
+      updateLocalConfig("video_qcom_low_latency", action.payload);
+    },
+    setVideoIntraRefresh: (state, action: PayloadAction<boolean>) => {
+      state.videoIntraRefresh = action.payload;
+      updateLocalConfig("video_intra_refresh", action.payload);
+    },
+    setShowDiagnostics: (state, action: PayloadAction<boolean>) => {
+      state.showDiagnostics = action.payload;
+      updateLocalConfig("show_diagnostics", action.payload);
+    },
+    setHwDecode: (state, action: PayloadAction<boolean>) => {
+      state.hwDecode = action.payload;
+      updateLocalConfig("hw_decode", action.payload);
+    },
   },
 });
 
@@ -173,6 +221,14 @@ export const {
   setVideoBitRate,
   setVideoMaxSize,
   setVideoMaxFps,
+  setPresentMode,
+  setVideoCodecOptions,
+  setVideoLowLatency,
+  setVideoRealtimePriority,
+  setVideoQcomLowLatency,
+  setVideoIntraRefresh,
+  setShowDiagnostics,
+  setHwDecode,
 } = localConfigSlice.actions;
 
 export default localConfigSlice.reducer;

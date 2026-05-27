@@ -44,6 +44,7 @@ impl Controller {
         d_rx: UnboundedReceiver<ControllerCommand>,
         m_tx: crossbeam_channel::Sender<(MaskCommand, oneshot::Sender<Result<String, String>>)>,
         ws_tx: broadcast::Sender<WebSocketNotification>,
+        recycle_rx: crossbeam_channel::Receiver<Vec<u8>>,
     ) {
         thread::spawn(move || {
             tokio::runtime::Builder::new_multi_thread()
@@ -51,7 +52,7 @@ impl Controller {
                 .build()
                 .unwrap()
                 .block_on(async move {
-                    Controller::run_server(addr, cs_tx, v_tx, d_rx, m_tx, ws_tx).await;
+                    Controller::run_server(addr, cs_tx, v_tx, d_rx, m_tx, ws_tx, recycle_rx).await;
                 });
         });
     }
@@ -126,6 +127,7 @@ impl Controller {
         mut d_rx: UnboundedReceiver<ControllerCommand>,
         m_tx: crossbeam_channel::Sender<(MaskCommand, oneshot::Sender<Result<String, String>>)>,
         ws_tx: broadcast::Sender<WebSocketNotification>,
+        recycle_rx: crossbeam_channel::Receiver<Vec<u8>>,
     ) {
         log::info!("[Controller] {}: {}", t!("scrcpy.startingController"), addr);
         let listener = TcpListener::bind(addr).await.unwrap();
@@ -146,7 +148,8 @@ impl Controller {
                         let socket_id = "main_control".to_string();
 
                         if !ControlledDevice::is_scid_controlled(&scid).await {
-                            panic!("{}: {}", t!("scrcpy.deviceNotRecorded"), scid)
+                            log::error!("{}: {}", t!("scrcpy.deviceNotRecorded"), scid);
+                            continue;
                         }
 
                         let token = CancellationToken::new();
@@ -162,6 +165,7 @@ impl Controller {
                         let m_tx_copy = m_tx.clone();
                         match listener.accept().await {
                             Ok((socket, _)) => {
+                                socket.set_nodelay(true).ok();
                                 let ws_tx_copy = ws_tx.clone();
                                 let scid_copy = scid.clone();
                                 ws_tx_copy
@@ -202,7 +206,8 @@ impl Controller {
                         let socket_id = "main_video".to_string();
 
                         if !ControlledDevice::is_scid_controlled(&scid).await {
-                            panic!("{}: {}", t!("scrcpy.deviceNotRecorded"), scid)
+                            log::error!("{}: {}", t!("scrcpy.deviceNotRecorded"), scid);
+                            continue;
                         }
 
                         let token = CancellationToken::new();
@@ -210,18 +215,15 @@ impl Controller {
 
                         log::info!("[Controller] {}: {}", t!("scrcpy.creatingMainVideo"), scid);
                         let v_tx_copy = v_tx.clone();
+                        let recycle_rx_copy = recycle_rx.clone();
                         match listener.accept().await {
                             Ok((socket, _)) => {
-                                thread::spawn(move || {
-                                    tokio::runtime::Builder::new_current_thread()
-                                        .enable_all()
-                                        .build()
-                                        .unwrap()
-                                        .block_on(async move {
-                                            ScrcpyConnection::new(socket)
-                                                .handle_video(token, v_tx_copy, meta_flag, &scid)
-                                                .await;
-                                        });
+                                socket.set_nodelay(true).ok();
+                                let m_tx_clone = m_tx.clone();
+                                tokio::spawn(async move {
+                                    ScrcpyConnection::new(socket)
+                                        .handle_video(token, v_tx_copy, m_tx_clone, meta_flag, &scid, recycle_rx_copy)
+                                        .await;
                                 });
                             }
                             Err(e) => {
@@ -239,7 +241,8 @@ impl Controller {
                         let socket_id = format!("sub_control_{}", scid);
 
                         if !ControlledDevice::is_scid_controlled(&scid).await {
-                            panic!("{}: {}", t!("scrcpy.deviceNotRecorded"), scid)
+                            log::error!("{}: {}", t!("scrcpy.deviceNotRecorded"), scid);
+                            continue;
                         }
 
                         let token = CancellationToken::new();
@@ -251,12 +254,13 @@ impl Controller {
                         let m_tx_copy = m_tx.clone();
                         match listener.accept().await {
                             Ok((socket, _)) => {
+                                socket.set_nodelay(true).ok();
                                 let ws_tx_copy = ws_tx.clone();
                                 let scid_copy = scid.clone();
                                 ws_tx_copy
                                     .send(WebSocketNotification::ScrcpyDeviceConnection {
                                         scid: scid_copy.clone(),
-                                        main: true,
+                                        main: false,
                                         connected: true,
                                     })
                                     .ok();
@@ -269,7 +273,7 @@ impl Controller {
                                     ws_tx_copy
                                         .send(WebSocketNotification::ScrcpyDeviceConnection {
                                             scid: scid_copy,
-                                            main: true,
+                                            main: false,
                                             connected: false,
                                         })
                                         .ok();

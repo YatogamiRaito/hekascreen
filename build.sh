@@ -18,6 +18,7 @@ fi
 PREFIX="ffmpeg-$OS"
 export PKG_CONFIG_PATH="$SCRIPT_DIR/$FFMPEG/$PREFIX/lib/pkgconfig"
 export FFMPEG_DIR="$SCRIPT_DIR/$FFMPEG/$PREFIX"
+export PKG_CONFIG_ALL_STATIC=1
 
 if [[ "$1" == "run" ]]; then
     cargo run

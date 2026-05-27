@@ -1,4 +1,4 @@
-use bevy::{prelude::*, window::WindowLevel};
+use bevy::{prelude::*, window::{WindowLevel, PrimaryWindow}};
 use bevy_ineffable::prelude::IneffableCommands;
 use rust_i18n::t;
 
@@ -43,17 +43,69 @@ pub enum MaskCommand {
 #[derive(Resource)]
 pub struct MaskSize(pub Vec2);
 
+pub enum ResizeState {
+    Resizing,
+    Showing,
+}
+
+pub struct PendingResize {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+    pub oneshot_tx: Option<tokio::sync::oneshot::Sender<Result<String, String>>>,
+    pub state: ResizeState,
+}
+
 pub fn handle_mask_command(
     m_rx: Res<ChannelReceiverM>,
     cs_tx_res: Res<ChannelSenderCS>,
     cursor_pos: Res<CursorPosition>,
-    mut window: Single<&mut Window>,
+    mut window_query: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut next_mapping_state: ResMut<NextState<MappingState>>,
     mut next_cursor_state: ResMut<NextState<CursorState>>,
     mut ineffable: IneffableCommands,
     mut active_mapping: ResMut<ActiveMappingConfig>,
     mut mask_size: ResMut<MaskSize>,
+    mut pending_resize: Local<Option<PendingResize>>,
 ) {
+    if let Some(ref mut pending) = *pending_resize {
+        if let Ok((_, mut window)) = window_query.single_mut() {
+            match pending.state {
+                ResizeState::Resizing => {
+                    let width = (pending.right - pending.left) as f32;
+                    let height = (pending.bottom - pending.top) as f32;
+
+                    window.resolution.set(width, height);
+                    window.position.set((pending.left, pending.top).into());
+
+                    pending.state = ResizeState::Showing;
+                }
+                ResizeState::Showing => {
+                    window.visible = true;
+                    mask_size.0 = window.resolution.size();
+
+                    let msg = t!(
+                        "mask.windowMovedAndResized",
+                        left => pending.left,
+                        top => pending.top,
+                        width => mask_size.0.x,
+                        height => mask_size.0.y
+                    )
+                    .to_string();
+
+                    log::info!("[Mask] {}", msg);
+                    if let Some(oneshot_tx) = pending.oneshot_tx.take() {
+                        let _ = oneshot_tx.send(Ok(msg));
+                    }
+
+                    *pending_resize = None;
+                }
+            }
+        }
+        return;
+    }
+
     for (msg, oneshot_tx) in m_rx.0.try_iter() {
         match msg {
             MaskCommand::WinMove {
@@ -62,32 +114,83 @@ pub fn handle_mask_command(
                 right,
                 bottom,
             } => {
-                // logical size and position
                 let width = (right - left) as f32;
                 let height = (bottom - top) as f32;
 
-                window.resolution.set(width, height);
-                window.position.set((left, top).into());
+                #[cfg(target_os = "linux")]
+                {
+                    // NOTE: Previously this used despawn+spawn to work around a supposed X11
+                    // positioning bug. However that approach leaves a window-less gap where
+                    // Bevy's winit loop goes to sleep (no events → no frames), so the deferred
+                    // spawn command can take seconds to execute. Simply resizing+repositioning
+                    // the existing window is both correct and avoids the gap entirely.
+                    if let Ok((_, mut window)) = window_query.single_mut() {
+                        window.resolution.set(width, height);
+                        window.position.set((left, top).into());
+                        window.visible = true;
+                    }
 
-                mask_size.0 = window.resolution.size();
+                    mask_size.0 = Vec2::new(width, height);
 
-                let msg = t!(
-                    "mask.windowMovedAndResized",
-                    left => left,
-                    top => top,
-                    width => mask_size.0.x,
-                    height => mask_size.0.y
-                )
-                .to_string();
+                    let msg = t!(
+                        "mask.windowMovedAndResized",
+                        left => left,
+                        top => top,
+                        width => mask_size.0.x,
+                        height => mask_size.0.y
+                    )
+                    .to_string();
 
-                log::info!("[Mask] {}", msg);
-                oneshot_tx.send(Ok(msg)).unwrap();
+                    log::info!("[Mask] {}", msg);
+                    let _ = oneshot_tx.send(Ok(msg));
+                }
+
+                #[cfg(not(target_os = "linux"))]
+                {
+                    if let Ok((_, window)) = window_query.single() {
+                        if window.visible {
+                            *pending_resize = Some(PendingResize {
+                                left,
+                                top,
+                                right,
+                                bottom,
+                                oneshot_tx: Some(oneshot_tx),
+                                state: ResizeState::Resizing,
+                            });
+                            if let Ok((_, mut window_mut)) = window_query.single_mut() {
+                                window_mut.visible = false;
+                            }
+                            return;
+                        } else {
+                            if let Ok((_, mut window_mut)) = window_query.single_mut() {
+                                window_mut.resolution.set(width, height);
+                                window_mut.position.set((left, top).into());
+                            }
+
+                            mask_size.0 = Vec2::new(width, height);
+
+                            let msg = t!(
+                                "mask.windowMovedAndResized",
+                                left => left,
+                                top => top,
+                                width => mask_size.0.x,
+                                height => mask_size.0.y
+                            )
+                            .to_string();
+
+                            log::info!("[Mask] {}", msg);
+                            let _ = oneshot_tx.send(Ok(msg));
+                        }
+                    }
+                }
             }
             MaskCommand::WinSwitchLevel { top } => {
-                if top {
-                    window.window_level = WindowLevel::AlwaysOnTop;
-                } else {
-                    window.window_level = WindowLevel::Normal;
+                if let Ok((_, mut window)) = window_query.single_mut() {
+                    if top {
+                        window.window_level = WindowLevel::AlwaysOnTop;
+                    } else {
+                        window.window_level = WindowLevel::Normal;
+                    }
                 }
                 let msg = format!("[Mask] {}: {}", t!("mask.windowLevelChanged"), top);
                 log::info!("{}", msg);
@@ -97,13 +200,17 @@ pub fn handle_mask_command(
                 let msg = if connect {
                     next_mapping_state.set(MappingState::Normal);
                     log::info!("[Mapping] {}", t!("mask.enterNormalMappingMode"));
-                    window.visible = true;
+                    if let Ok((_, mut window)) = window_query.single_mut() {
+                        window.visible = true;
+                    }
                     t!("mask.mainDeviceConnected").to_string()
                 } else {
                     next_cursor_state.set(CursorState::Normal);
                     next_mapping_state.set(MappingState::Stop);
                     log::info!("[Mapping] {}", t!("mask.exitStopMappingMode"));
-                    window.visible = false;
+                    if let Ok((_, mut window)) = window_query.single_mut() {
+                        window.visible = false;
+                    }
                     t!("mask.mainDeviceDisconnected").to_string()
                 };
                 log::info!("[Mask] {}", msg);

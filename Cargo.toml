@@ -51,6 +51,7 @@ rust-i18n = "3"
 ffmpeg-next = { version = "7.1.0", default-features = false, features = [
     "format",
     "software-scaling",
+    "static",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

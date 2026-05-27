@@ -45,12 +45,24 @@ pub struct BindMappingScript {
 
 impl From<MappingScript> for BindMappingScript {
     fn from(value: MappingScript) -> Self {
+        let pressed_script_ast = ScriptAST::new(&value.pressed_script).unwrap_or_else(|e| {
+            log::error!("Failed to parse pressed script: {}", e);
+            ScriptAST::default()
+        });
+        let released_script_ast = ScriptAST::new(&value.released_script).unwrap_or_else(|e| {
+            log::error!("Failed to parse released script: {}", e);
+            ScriptAST::default()
+        });
+        let held_script_ast = ScriptAST::new(&value.held_script).unwrap_or_else(|e| {
+            log::error!("Failed to parse held script: {}", e);
+            ScriptAST::default()
+        });
         Self {
             position: value.position,
             note: value.note,
-            pressed_script_ast: ScriptAST::new(&value.pressed_script).unwrap(),
-            released_script_ast: ScriptAST::new(&value.released_script).unwrap(),
-            held_script_ast: ScriptAST::new(&value.held_script).unwrap(),
+            pressed_script_ast,
+            released_script_ast,
+            held_script_ast,
             pressed_script: value.pressed_script,
             released_script: value.released_script,
             held_script: value.held_script,

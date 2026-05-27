@@ -282,7 +282,26 @@
     "videoMaxSize": "视频最大尺寸",
     "zeroUnlimitedTip": "设为 0 表示无限制",
     "videoMaxFps": "视频最大FPS",
+    "presentMode": "Bevy 渲染呈现模式",
+    "presentModeTip": "配置 Bevy 窗口的的渲染呈现方式。Mailbox 或 AutoNoVsync 可最大限度地减少窗口渲染延迟。",
+    "presentModeOptions": {
+      "AutoVsync": "启用垂直同步 (AutoVsync)",
+      "AutoNoVsync": "禁用垂直同步 (AutoNoVsync)",
+      "Immediate": "即时模式 (延迟最低，画面可能会撕裂)",
+      "Mailbox": "邮箱模式 (快速垂直同步，超低延迟且无撕裂)"
+    },
+    "videoCodecOptions": "视频编码器参数",
+    "videoCodecOptionsTip": "发送给安卓硬编解码器的自定义格式参数（例如 Snapdragon 处理器上可使用 latency=0,priority=0 或 vendor.qti-ext-enc-low-latency.enable=1）。",
+    "lowLatencyParams": "低延迟优化选项",
+    "lowLatencyParamsOptions": {
+      "lowLatency": "标准低延迟模式",
+      "realtimePriority": "实时编码器优先级",
+      "qcomLowLatency": "骁龙硬件低延迟优化",
+      "intraRefresh": "帧内刷新模式"
+    },
     "alwaysOnTop": "蒙版置顶",
+    "showDiagnostics": "显示性能诊断面板",
+    "hwDecode": "硬件解码 (VAAPI)",
     "openDataPath": "打开数据目录",
     "about": {
       "title": "关于",

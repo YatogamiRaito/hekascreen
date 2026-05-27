@@ -12,6 +12,7 @@ import {
   Space,
   Switch,
   Typography,
+  Checkbox,
 } from "antd";
 import {
   forceSetLocalConfig,
@@ -30,6 +31,14 @@ import {
   setVideoMaxSize,
   setVideoMaxFps,
   setAlwaysOnTop,
+  setPresentMode,
+  setVideoCodecOptions,
+  setVideoLowLatency,
+  setVideoRealtimePriority,
+  setVideoQcomLowLatency,
+  setVideoIntraRefresh,
+  setShowDiagnostics,
+  setHwDecode,
 } from "../store/localConfig";
 import {
   setIsLoading,
@@ -55,6 +64,10 @@ const languageOptions = [
   {
     label: "English",
     value: "en-US",
+  },
+  {
+    label: "Türkçe",
+    value: "tr-TR",
   },
 ];
 
@@ -295,6 +308,73 @@ export default function Settings() {
               min={0}
               value={localConfig.videoMaxFps}
               onChange={(v) => v !== null && dispatch(setVideoMaxFps(v))}
+            />
+          </ItemBox>
+          <ItemBox
+            label={t("settings.presentMode")}
+            tooltip={t("settings.presentModeTip")}
+          >
+            <Select
+              className="w-sm"
+              value={localConfig.presentMode}
+              options={[
+                { value: "AutoVsync", label: t("settings.presentModeOptions.AutoVsync") },
+                { value: "AutoNoVsync", label: t("settings.presentModeOptions.AutoNoVsync") },
+                { value: "Immediate", label: t("settings.presentModeOptions.Immediate") },
+                { value: "Mailbox", label: t("settings.presentModeOptions.Mailbox") },
+              ]}
+              onChange={(v) => dispatch(setPresentMode(v))}
+            />
+          </ItemBox>
+          <ItemBox
+            label={t("settings.videoCodecOptions")}
+            tooltip={t("settings.videoCodecOptionsTip")}
+          >
+            <Input
+              className="w-sm"
+              value={localConfig.videoCodecOptions}
+              onChange={(e) => dispatch(setVideoCodecOptions(e.target.value))}
+              placeholder="e.g. latency=0,priority=0"
+            />
+          </ItemBox>
+          <ItemBox label={t("settings.lowLatencyParams")}>
+            <Space direction="vertical">
+              <Checkbox
+                checked={localConfig.videoLowLatency}
+                onChange={(e) => dispatch(setVideoLowLatency(e.target.checked))}
+              >
+                {t("settings.lowLatencyParamsOptions.lowLatency")} (latency=0)
+              </Checkbox>
+              <Checkbox
+                checked={localConfig.videoRealtimePriority}
+                onChange={(e) => dispatch(setVideoRealtimePriority(e.target.checked))}
+              >
+                {t("settings.lowLatencyParamsOptions.realtimePriority")} (priority=0)
+              </Checkbox>
+              <Checkbox
+                checked={localConfig.videoQcomLowLatency}
+                onChange={(e) => dispatch(setVideoQcomLowLatency(e.target.checked))}
+              >
+                {t("settings.lowLatencyParamsOptions.qcomLowLatency")} (Qualcomm low-latency)
+              </Checkbox>
+              <Checkbox
+                checked={localConfig.videoIntraRefresh}
+                onChange={(e) => dispatch(setVideoIntraRefresh(e.target.checked))}
+              >
+                {t("settings.lowLatencyParamsOptions.intraRefresh")} (intra-refresh-period=60)
+              </Checkbox>
+            </Space>
+          </ItemBox>
+          <ItemBox label={t("settings.showDiagnostics")}>
+            <Switch
+              checked={localConfig.showDiagnostics}
+              onChange={(v) => dispatch(setShowDiagnostics(v))}
+            />
+          </ItemBox>
+          <ItemBox label={t("settings.hwDecode")}>
+            <Switch
+              checked={localConfig.hwDecode}
+              onChange={(v) => dispatch(setHwDecode(v))}
             />
           </ItemBox>
         </ItemBoxContainer>

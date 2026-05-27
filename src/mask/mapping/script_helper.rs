@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Mutex;
 
 use bevy::math::Vec2;
+use once_cell::sync::Lazy;
 use pest::iterators::Pair;
 use pest::{Parser, Span};
 use pest_derive::Parser;
@@ -11,6 +13,18 @@ use tokio::sync::broadcast;
 use crate::mask::mapping::utils::{ControlMsgHelper, MIN_MOVE_STEP_INTERVAL, ease_sigmoid_like};
 use crate::scrcpy::constant::{KeyEventAction, Keycode, MetaState, MotionEventAction};
 use crate::scrcpy::control_msg::ScrcpyControlMsg;
+
+static SCRIPT_TOGGLES: Lazy<Mutex<HashMap<i64, bool>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+#[derive(Debug, Clone)]
+pub enum ScriptVar {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Str(String),
+}
+
+static SCRIPT_VARS: Lazy<Mutex<HashMap<String, ScriptVar>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Parser)]
 #[grammar = "src/mask/mapping/script.pest"]
@@ -93,6 +107,212 @@ impl ScriptAST {
                     Self::to_int_value(&args[0]) as u64,
                 ));
                 Ok(Value::Int(0))
+            },
+        );
+
+        ast.build_in_funcs.insert(
+            "sleep".to_string(),
+            |source: &str, span: &SourceSpan, args: &[Value]| {
+                if args.len() != 1 || !matches!(args[0], Value::Int(_)) {
+                    return Err(ScriptError::from_span(
+                        span.clone(),
+                        source,
+                        "The sleep function takes one argument: time (int)".to_string(),
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(
+                    Self::to_int_value(&args[0]) as u64,
+                ));
+                Ok(Value::Int(0))
+            },
+        );
+
+        ast.build_in_funcs.insert(
+            "toggle".to_string(),
+            |source: &str, span: &SourceSpan, args: &[Value]| {
+                if args.len() != 1 || !matches!(args[0], Value::Int(_)) {
+                    return Err(ScriptError::from_span(
+                        span.clone(),
+                        source,
+                        "The toggle function takes one argument: id (int)".to_string(),
+                    ));
+                }
+                let id = match args[0] {
+                    Value::Int(i) => i,
+                    _ => unreachable!(),
+                };
+                let mut toggles = SCRIPT_TOGGLES.lock().unwrap();
+                let entry = toggles.entry(id).or_insert(false);
+                *entry = !*entry;
+                Ok(Value::Bool(*entry))
+            },
+        );
+
+        ast.build_in_funcs.insert(
+            "set_toggle".to_string(),
+            |source: &str, span: &SourceSpan, args: &[Value]| {
+                if args.len() != 2 || !matches!(args[0], Value::Int(_)) {
+                    return Err(ScriptError::from_span(
+                        span.clone(),
+                        source,
+                        "The set_toggle function takes two arguments: id (int), value (bool/int)".to_string(),
+                    ));
+                }
+                let id = match args[0] {
+                    Value::Int(i) => i,
+                    _ => unreachable!(),
+                };
+                let val = match args[1] {
+                    Value::Bool(b) => b,
+                    Value::Int(i) => i != 0,
+                    _ => {
+                        return Err(ScriptError::from_span(
+                            span.clone(),
+                            source,
+                            "The set_toggle function's second argument must be a boolean or integer".to_string(),
+                        ));
+                    }
+                };
+                let mut toggles = SCRIPT_TOGGLES.lock().unwrap();
+                toggles.insert(id, val);
+                Ok(Value::Int(0))
+            },
+        );
+
+        ast.build_in_funcs.insert(
+            "get_toggle".to_string(),
+            |source: &str, span: &SourceSpan, args: &[Value]| {
+                if args.len() != 1 || !matches!(args[0], Value::Int(_)) {
+                    return Err(ScriptError::from_span(
+                        span.clone(),
+                        source,
+                        "The get_toggle function takes one argument: id (int)".to_string(),
+                    ));
+                }
+                let id = match args[0] {
+                    Value::Int(i) => i,
+                    _ => unreachable!(),
+                };
+                let toggles = SCRIPT_TOGGLES.lock().unwrap();
+                let val = toggles.get(&id).cloned().unwrap_or(false);
+                Ok(Value::Bool(val))
+            },
+        );
+
+        ast.build_in_funcs.insert(
+            "set_var".to_string(),
+            |source: &str, span: &SourceSpan, args: &[Value]| {
+                if args.len() != 2 {
+                    return Err(ScriptError::from_span(
+                        span.clone(),
+                        source,
+                        "The set_var function takes two arguments: name (str), value (any)".to_string(),
+                    ));
+                }
+                let name = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => {
+                        return Err(ScriptError::from_span(
+                            span.clone(),
+                            source,
+                            "The set_var function's first argument must be a string".to_string(),
+                        ));
+                    }
+                };
+                let val = args[1].clone();
+                let script_var = match val {
+                    Value::Int(i) => ScriptVar::Int(i),
+                    Value::Bool(b) => ScriptVar::Bool(b),
+                    Value::Str(s) => ScriptVar::Str(s),
+                };
+                let mut vars = SCRIPT_VARS.lock().unwrap();
+                vars.insert(name, script_var);
+                Ok(Value::Int(0))
+            },
+        );
+
+        ast.build_in_funcs.insert(
+            "get_var".to_string(),
+            |source: &str, span: &SourceSpan, args: &[Value]| {
+                if args.len() != 1 {
+                    return Err(ScriptError::from_span(
+                        span.clone(),
+                        source,
+                        "The get_var function takes one argument: name (str)".to_string(),
+                    ));
+                }
+                let name = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => {
+                        return Err(ScriptError::from_span(
+                            span.clone(),
+                            source,
+                            "The get_var function's argument must be a string".to_string(),
+                        ));
+                    }
+                };
+                let vars = SCRIPT_VARS.lock().unwrap();
+                if let Some(var) = vars.get(&name) {
+                    match var {
+                        ScriptVar::Int(i) => Ok(Value::Int(*i)),
+                        ScriptVar::Float(f) => Ok(Value::Int(*f as i64)),
+                        ScriptVar::Bool(b) => Ok(Value::Bool(*b)),
+                        ScriptVar::Str(s) => Ok(Value::Str(s.clone())),
+                    }
+                } else {
+                    Ok(Value::Int(0))
+                }
+            },
+        );
+
+        ast.build_in_funcs.insert(
+            "del_var".to_string(),
+            |source: &str, span: &SourceSpan, args: &[Value]| {
+                if args.len() != 1 {
+                    return Err(ScriptError::from_span(
+                        span.clone(),
+                        source,
+                        "The del_var function takes one argument: name (str)".to_string(),
+                    ));
+                }
+                let name = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => {
+                        return Err(ScriptError::from_span(
+                            span.clone(),
+                            source,
+                            "The del_var function's argument must be a string".to_string(),
+                        ));
+                    }
+                };
+                let mut vars = SCRIPT_VARS.lock().unwrap();
+                vars.remove(&name);
+                Ok(Value::Int(0))
+            },
+        );
+
+        ast.build_in_funcs.insert(
+            "has_var".to_string(),
+            |source: &str, span: &SourceSpan, args: &[Value]| {
+                if args.len() != 1 {
+                    return Err(ScriptError::from_span(
+                        span.clone(),
+                        source,
+                        "The has_var function takes one argument: name (str)".to_string(),
+                    ));
+                }
+                let name = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => {
+                        return Err(ScriptError::from_span(
+                            span.clone(),
+                            source,
+                            "The has_var function's argument must be a string".to_string(),
+                        ));
+                    }
+                };
+                let vars = SCRIPT_VARS.lock().unwrap();
+                Ok(Value::Bool(vars.contains_key(&name)))
             },
         );
 

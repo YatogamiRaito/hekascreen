@@ -109,7 +109,20 @@ async fn _control_device(
 
     // prepare for scrcpy app
     let scid = gen_scid();
-    let version = "2.4";
+    let version = std::fs::read_dir(relate_to_root_path(["assets"]))
+        .ok()
+        .and_then(|read_dir| {
+            read_dir
+                .filter_map(|entry| entry.ok())
+                .filter_map(|entry| {
+                    let file_name = entry.file_name().into_string().ok()?;
+                    file_name
+                        .strip_prefix("scrcpy-mask-server-v")
+                        .map(|v| v.to_string())
+                })
+                .max()
+        })
+        .unwrap_or_else(|| "4.0".to_string());
     let scrcpy_path = relate_to_root_path(["assets", &format!("scrcpy-mask-server-v{}", version)]);
     Device::push(
         &device_id,
@@ -160,10 +173,29 @@ async fn _control_device(
             args.push(format!("video_codec={}", local_config.video_codec));
             args.push(format!("video_bit_rate={}", local_config.video_bit_rate));
             if local_config.video_max_size > 0 {
-                args.push(format!("video_max_size={}", local_config.video_max_size));
+                args.push(format!("max_size={}", local_config.video_max_size));
             }
             if local_config.video_max_fps > 0 {
-                args.push(format!("video_max_fps={}", local_config.video_max_fps));
+                args.push(format!("max_fps={}", local_config.video_max_fps));
+            }
+            let mut codec_opts = Vec::new();
+            if local_config.video_low_latency {
+                codec_opts.push("latency=0".to_string());
+            }
+            if local_config.video_realtime_priority {
+                codec_opts.push("priority=0".to_string());
+            }
+            if local_config.video_qcom_low_latency {
+                codec_opts.push("vendor.qti-ext-enc-low-latency.enable=1".to_string());
+            }
+            if local_config.video_intra_refresh {
+                codec_opts.push("intra-refresh-period=60".to_string());
+            }
+            if !local_config.video_codec_options.is_empty() {
+                codec_opts.push(local_config.video_codec_options.clone());
+            }
+            if !codec_opts.is_empty() {
+                args.push(format!("video_codec_options={}", codec_opts.join(",")));
             }
         }
         socket_id.push("main_control".to_string());
@@ -179,7 +211,9 @@ async fn _control_device(
     ControlledDevice::add_device(device_id.clone(), scid.clone(), main, socket_id).await;
     // send command to controller server
     for cmd in commands {
-        d_tx.send(cmd).unwrap();
+        if let Err(e) = d_tx.send(cmd) {
+            log::error!("[WebServe] Failed to send connect command to controller: {}", e);
+        }
     }
 
     // run scrcpy app
@@ -256,9 +290,13 @@ async fn _decontrol_device(
         if device.device_id == device_id {
             let scid = device.scid.clone();
             if device.main {
-                d_tx.send(ControllerCommand::ShutdownMain(scid)).unwrap();
+                if let Err(e) = d_tx.send(ControllerCommand::ShutdownMain(scid)) {
+                    log::error!("[WebServe] Failed to send shutdown command to controller: {}", e);
+                }
             } else {
-                d_tx.send(ControllerCommand::ShutdownSub(scid)).unwrap();
+                if let Err(e) = d_tx.send(ControllerCommand::ShutdownSub(scid)) {
+                    log::error!("[WebServe] Failed to send shutdown command to controller: {}", e);
+                }
             }
             ControlledDevice::remove_device(&device.scid).await;
             return Ok(JsonResponse::success(
@@ -409,10 +447,12 @@ async fn set_display_power(
         )));
     }
 
-    state
+    if let Err(e) = state
         .cs_tx
         .send(ScrcpyControlMsg::SetDisplayPower { mode: payload.mode })
-        .unwrap();
+    {
+        log::warn!("[WebServe] Failed to send SetDisplayPower: {}", e);
+    }
     Ok(JsonResponse::success(
         t!("web.device.setDisplayPowerSuccess"),
         None,
@@ -434,7 +474,7 @@ async fn send_key(
         )));
     }
 
-    state
+    if let Err(e) = state
         .cs_tx
         .send(ScrcpyControlMsg::InjectKeycode {
             action: KeyEventAction::Down,
@@ -442,9 +482,11 @@ async fn send_key(
             repeat: 0,
             metastate: MetaState::NONE,
         })
-        .unwrap();
+    {
+        log::warn!("[WebServe] Failed to send KeyDown: {}", e);
+    }
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    state
+    if let Err(e) = state
         .cs_tx
         .send(ScrcpyControlMsg::InjectKeycode {
             action: KeyEventAction::Up,
@@ -452,7 +494,9 @@ async fn send_key(
             repeat: 0,
             metastate: MetaState::NONE,
         })
-        .unwrap();
+    {
+        log::warn!("[WebServe] Failed to send KeyUp: {}", e);
+    }
     Ok(JsonResponse::success(t!("web.device.sendKeySuccess"), None))
 }
 
@@ -472,7 +516,7 @@ async fn eval_script(
     }
 
     let (oneshot_tx, oneshot_rx) = oneshot::channel::<Result<String, String>>();
-    state
+    if let Err(e) = state
         .m_tx
         .send((
             MaskCommand::EvalScript {
@@ -480,15 +524,24 @@ async fn eval_script(
             },
             oneshot_tx,
         ))
-        .unwrap();
-    match oneshot_rx.await.unwrap() {
-        Ok(_) => Ok(JsonResponse::success(
-            t!("web.device.evalScriptSuccess"),
-            None,
-        )),
-        Err(e) => Err(WebServerError::bad_request(format!(
-            "{}:\n{}",
-            t!("web.device.evalScriptError"),
+    {
+        log::error!("[WebServe] Failed to send EvalScript command: {}", e);
+        return Err(WebServerError::internal_error(e.to_string()));
+    }
+    match oneshot_rx.await {
+        Ok(res) => match res {
+            Ok(_) => Ok(JsonResponse::success(
+                t!("web.device.evalScriptSuccess"),
+                None,
+            )),
+            Err(e) => Err(WebServerError::bad_request(format!(
+                "{}:\n{}",
+                t!("web.device.evalScriptError"),
+                e
+            ))),
+        },
+        Err(e) => Err(WebServerError::internal_error(format!(
+            "Bevy main thread dropped the response channel: {}",
             e
         ))),
     }

@@ -16,6 +16,7 @@ use scrcpy_mask::{
     },
     utils::{
         ChannelReceiverM, ChannelReceiverV, ChannelSenderCS, check_for_update, relate_to_data_path,
+        VideoBufferRecycler, LiveDiagnostics,
     },
     web::{self, ws::WebSocketNotification},
 };
@@ -56,7 +57,7 @@ fn main() {
     // update language
     let language = local_config.language;
     match language.as_str() {
-        "zh-CN" | "en-US" => rust_i18n::set_locale(&language),
+        "zh-CN" | "en-US" | "tr-TR" => rust_i18n::set_locale(&language),
         _ => {
             rust_i18n::set_locale(default_language);
             LocalConfig::set_language(default_language.to_string());
@@ -80,8 +81,13 @@ fn main() {
                     has_shadow: false,
                     transparent: true, // for windows: https://github.com/bevyengine/bevy/issues/7544
                     decorations: false,
-                    present_mode: PresentMode::AutoVsync,
-                    resizable: false,
+                    present_mode: match local_config.present_mode.as_str() {
+                        "AutoNoVsync" => PresentMode::AutoNoVsync,
+                        "Immediate" => PresentMode::Immediate,
+                        "Mailbox" => PresentMode::Mailbox,
+                        _ => PresentMode::AutoVsync,
+                    },
+                    resizable: true,
                     visible: false,
                     window_level: if local_config.always_on_top {
                         WindowLevel::AlwaysOnTop
@@ -94,12 +100,17 @@ fn main() {
                     composite_alpha_mode: bevy::window::CompositeAlphaMode::PreMultiplied,
                     ..default()
                 }),
+                #[cfg(target_os = "linux")]
+                exit_condition: bevy::window::ExitCondition::DontExit,
                 ..default()
             }),
     )
     .add_plugins(bevy_tokio_tasks::TokioTasksPlugin::default())
     .add_plugins(MaskPlugins)
     .add_systems(Startup, (start_servers, check_for_update_system));
+
+    #[cfg(target_os = "linux")]
+    app.add_systems(Update, handle_close_requested);
 
     #[cfg(target_os = "macos")]
     {
@@ -139,11 +150,15 @@ fn start_servers(mut commands: Commands) {
         crossbeam_channel::unbounded::<(MaskCommand, oneshot::Sender<Result<String, String>>)>();
     let (d_tx, d_rx) = mpsc::unbounded_channel::<ControllerCommand>();
 
+    let (recycle_tx, recycle_rx) = crossbeam_channel::bounded::<Vec<u8>>(16);
+
     commands.insert_resource(ChannelSenderCS(cs_tx.clone()));
     commands.insert_resource(ChannelReceiverV(v_rx));
     commands.insert_resource(ChannelReceiverM(m_rx));
+    commands.insert_resource(VideoBufferRecycler(recycle_tx));
+    commands.insert_resource(LiveDiagnostics::default());
     web::Server::start(web_addr, cs_tx.clone(), d_tx, m_tx.clone(), ws_tx.clone());
-    controller::Controller::start(controller_addr, cs_tx, v_tx, d_rx, m_tx, ws_tx);
+    controller::Controller::start(controller_addr, cs_tx, v_tx, d_rx, m_tx, ws_tx, recycle_rx);
 }
 
 fn check_for_update_system(runtime: ResMut<TokioTasksRuntime>) {
@@ -152,4 +167,14 @@ fn check_for_update_system(runtime: ResMut<TokioTasksRuntime>) {
             log::error!("{}", e);
         }
     });
+}
+
+#[cfg(target_os = "linux")]
+fn handle_close_requested(
+    mut events: EventReader<bevy::window::WindowCloseRequested>,
+    mut exit: EventWriter<AppExit>,
+) {
+    for _ in events.read() {
+        exit.write(AppExit::default());
+    }
 }

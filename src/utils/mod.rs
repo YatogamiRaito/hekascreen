@@ -81,6 +81,26 @@ pub struct ChannelReceiverM(
     pub crossbeam_channel::Receiver<(MaskCommand, oneshot::Sender<Result<String, String>>)>,
 );
 
+#[derive(Resource)]
+pub struct VideoBufferRecycler(pub crossbeam_channel::Sender<Vec<u8>>);
+
+pub static LAST_INPUT_TIME_MICROS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[derive(Resource, Default, Clone)]
+pub struct LiveDiagnostics {
+    // Per-frame perf counters (updated every decoded frame)
+    pub decode_time_ms: f32,
+    pub queue_delay_ms: f32,
+    pub last_input_latency_ms: Option<f32>,
+    // Stream-level info (set once when the video stream is established,
+    // cleared on VideoMsg::Close). Values here reflect what is *actually*
+    // active, not just what the user enabled in Settings.
+    pub video_codec: Option<String>,   // "H265" / "H264" / "AV1" — from server metadata
+    pub hw_decode_active: bool,        // true only if VAAPI hw_device_ctx was created
+    pub video_width: u32,
+    pub video_height: u32,
+}
+
 pub async fn mask_win_move_helper(
     device_w: u32,
     device_h: u32,

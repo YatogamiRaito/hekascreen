@@ -11,7 +11,7 @@ use bevy::{
 
 use crate::mask::{
     mask_command::{MaskSize, handle_mask_command},
-    video::{VideoAttributes, handle_video_msg, init_video},
+    video::{VideoAttributes, handle_video_msg, init_video, update_diagnostics_hud},
 };
 
 pub struct MaskPlugins;
@@ -21,7 +21,7 @@ impl Plugin for MaskPlugins {
         app.add_plugins((ui::UiPlugins, mapping::MappingPlugins))
             .init_non_send_resource::<VideoAttributes>()
             .add_systems(Startup, (init_mask_size, init_video))
-            .add_systems(Update, (handle_mask_command, handle_video_msg));
+            .add_systems(Update, (handle_mask_command, handle_video_msg, update_diagnostics_hud));
     }
 }
 

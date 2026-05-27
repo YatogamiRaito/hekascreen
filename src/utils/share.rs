@@ -58,6 +58,11 @@ impl ControlledDevice {
             }
         }
     }
+
+    pub async fn get_device_size(scid: &str) -> Option<(u32, u32)> {
+        let device_list = CONTROLLED_DEVICES.read().await;
+        device_list.iter().find(|device| device.scid == scid).map(|device| device.device_size)
+    }
 }
 
 #[derive(Clone, Serialize)]

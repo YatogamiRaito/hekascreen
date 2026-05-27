@@ -92,7 +92,7 @@ async fn update_config(
     match payload.key.as_str() {
         "language" => {
             if let Some(value) = payload.value.as_str() {
-                if !matches!(value, "zh-CN" | "en-US") {
+                if !matches!(value, "zh-CN" | "en-US" | "tr-TR") {
                     return Err(WebServerError::bad_request(format!(
                         "{}: {}",
                         t!("web.config.invalidLanguage"),
@@ -169,12 +169,18 @@ async fn update_config(
             if let Some(value) = payload.value.as_bool() {
                 LocalConfig::set_always_on_top(value);
                 let (oneshot_tx, oneshot_rx) = oneshot::channel::<Result<String, String>>();
-                state
+                if let Err(e) = state
                     .m_tx
                     .send((MaskCommand::WinSwitchLevel { top: value }, oneshot_tx))
-                    .unwrap();
-                let msg = oneshot_rx.await.unwrap().unwrap();
-                return Ok(JsonResponse::success(msg, None));
+                {
+                    log::error!("[WebServe] Failed to send WinSwitchLevel: {}", e);
+                    return Err(WebServerError::internal_error(e.to_string()));
+                }
+                match oneshot_rx.await {
+                    Ok(Ok(msg)) => return Ok(JsonResponse::success(msg, None)),
+                    Ok(Err(e)) => return Err(WebServerError::bad_request(e)),
+                    Err(e) => return Err(WebServerError::internal_error(e.to_string())),
+                }
             } else {
                 return Err(WebServerError::bad_request(t!(
                     "web.config.alwaysOnTopMustBeBool"
@@ -367,6 +373,109 @@ async fn update_config(
             }
             return Err(WebServerError::bad_request(t!(
                 "web.config.videoMaxFpsTypeError"
+            )));
+        }
+        "present_mode" => {
+            if let Some(value) = payload.value.as_str() {
+                if !matches!(value, "AutoVsync" | "AutoNoVsync" | "Immediate" | "Mailbox") {
+                    return Err(WebServerError::bad_request(format!(
+                        "{}: {}",
+                        t!("web.config.invalidPresentMode"),
+                        value
+                    )));
+                }
+                LocalConfig::set_present_mode(value.to_string());
+                return Ok(JsonResponse::success(
+                    format!("{}: {}", t!("web.config.setPresentModeSuccess"), value),
+                    None,
+                ));
+            }
+            return Err(WebServerError::bad_request(t!(
+                "web.config.presentModeTypeError"
+            )));
+        }
+        "video_codec_options" => {
+            if let Some(value) = payload.value.as_str() {
+                LocalConfig::set_video_codec_options(value.to_string());
+                return Ok(JsonResponse::success(
+                    format!("{}: {}", t!("web.config.setVideoCodecOptionsSuccess"), value),
+                    None,
+                ));
+            }
+            return Err(WebServerError::bad_request(t!(
+                "web.config.videoCodecOptionsTypeError"
+            )));
+        }
+        "video_low_latency" => {
+            if let Some(value) = payload.value.as_bool() {
+                LocalConfig::set_video_low_latency(value);
+                return Ok(JsonResponse::success(
+                    format!("{}: {}", t!("web.config.setVideoLowLatencySuccess"), value),
+                    None,
+                ));
+            }
+            return Err(WebServerError::bad_request(t!(
+                "web.config.videoLowLatencyTypeError"
+            )));
+        }
+        "video_realtime_priority" => {
+            if let Some(value) = payload.value.as_bool() {
+                LocalConfig::set_video_realtime_priority(value);
+                return Ok(JsonResponse::success(
+                    format!("{}: {}", t!("web.config.setVideoRealtimePrioritySuccess"), value),
+                    None,
+                ));
+            }
+            return Err(WebServerError::bad_request(t!(
+                "web.config.videoRealtimePriorityTypeError"
+            )));
+        }
+        "video_qcom_low_latency" => {
+            if let Some(value) = payload.value.as_bool() {
+                LocalConfig::set_video_qcom_low_latency(value);
+                return Ok(JsonResponse::success(
+                    format!("{}: {}", t!("web.config.setVideoQcomLowLatencySuccess"), value),
+                    None,
+                ));
+            }
+            return Err(WebServerError::bad_request(t!(
+                "web.config.videoQcomLowLatencyTypeError"
+            )));
+        }
+        "video_intra_refresh" => {
+            if let Some(value) = payload.value.as_bool() {
+                LocalConfig::set_video_intra_refresh(value);
+                return Ok(JsonResponse::success(
+                    format!("{}: {}", t!("web.config.setVideoIntraRefreshSuccess"), value),
+                    None,
+                ));
+            }
+            return Err(WebServerError::bad_request(t!(
+                "web.config.videoIntraRefreshTypeError"
+            )));
+        }
+        "show_diagnostics" => {
+            if let Some(value) = payload.value.as_bool() {
+                LocalConfig::set_show_diagnostics(value);
+                return Ok(JsonResponse::success(
+                    format!("{}: {}", t!("web.config.setShowDiagnosticsSuccess"), value),
+                    None,
+                ));
+            }
+            return Err(WebServerError::bad_request(t!(
+                "web.config.showDiagnosticsTypeError"
+            )));
+        }
+        "hw_decode" => {
+            if let Some(value) = payload.value.as_bool() {
+                LocalConfig::set_hw_decode(value);
+                return Ok(JsonResponse::success(
+                    format!("{}: {}", t!("web.config.setHwDecodeSuccess"), value),
+                    None,
+                ));
+            }
+            return Err(WebServerError::bad_request(t!(
+                "web.config.hwDecodeTypeError"
             )));
         }
         _ => Err(WebServerError::bad_request(format!(

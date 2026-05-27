@@ -79,6 +79,8 @@ OS="linux-x64"
 ./configure --prefix=./ffmpeg-$OS \
     --disable-all --disable-doc --disable-iconv \
     --enable-decoder=h264 --enable-decoder=hevc --enable-decoder=av1 \
+    --enable-hwaccel=h264_vaapi --enable-hwaccel=hevc_vaapi --enable-hwaccel=av1_vaapi \
+    --enable-vaapi \
     --enable-swscale --enable-avformat --enable-avcodec --enable-avutil --enable-swresample \
     --enable-gpl --enable-static --disable-shared
 

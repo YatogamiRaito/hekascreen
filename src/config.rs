@@ -41,6 +41,29 @@ pub struct LocalConfig {
     pub video_bit_rate: u32,
     pub video_max_size: u32,
     pub video_max_fps: u32,
+    pub present_mode: String,
+    pub video_codec_options: String,
+    pub video_low_latency: bool,
+    pub video_realtime_priority: bool,
+    pub video_qcom_low_latency: bool,
+    pub video_intra_refresh: bool,
+    pub show_diagnostics: bool,
+    pub config_version: u32,
+    pub hw_decode: bool,
+}
+
+fn get_system_language() -> String {
+    if let Ok(lang) = std::env::var("LANG") {
+        if lang.starts_with("zh") {
+            "zh-CN".to_string()
+        } else if lang.starts_with("tr") {
+            "tr-TR".to_string()
+        } else {
+            "en-US".to_string()
+        }
+    } else {
+        "en-US".to_string()
+    }
 }
 
 impl Default for LocalConfig {
@@ -56,12 +79,21 @@ impl Default for LocalConfig {
             horizontal_position: (100, 100),
             active_mapping_file: "default.json".to_string(),
             mapping_label_opacity: 0.3,
-            language: "en-US".to_string(),
+            language: get_system_language(),
             clipboard_sync: true,
-            video_codec: VideoCodec::H264,
-            video_bit_rate: 8_000000, // 8M
-            video_max_size: 0,        // default no limit
-            video_max_fps: 0,         // default no limit
+            video_codec: VideoCodec::H265,
+            video_bit_rate: 16_000000, // 16M
+            video_max_size: 1920,      // default 1920
+            video_max_fps: 60,         // default 60
+            present_mode: "AutoVsync".to_string(),
+            video_codec_options: "".to_string(),
+            video_low_latency: true,
+            video_realtime_priority: true,
+            video_qcom_low_latency: false, // causes stack corruption on Android 16 (OMX.qcom.video.encoder.hevc)
+            video_intra_refresh: false,
+            show_diagnostics: true,
+            config_version: 1,
+            hw_decode: false,
         }
     }
 }
@@ -106,9 +138,60 @@ impl LocalConfig {
                 e
             )
         })?;
-        let config: LocalConfig = serde_json::from_str(&config_string)
+        let mut config: LocalConfig = serde_json::from_str(&config_string)
             .map_err(|e| format!("{}: {}", t!("localConfig.serializeConfigError"), e))?;
+
+        let mut migrated = false;
+        if config.video_codec == VideoCodec::H264 {
+            config.video_codec = VideoCodec::H265;
+            eprintln!("[HekaScreen] Config migration: video_codec H264 → H265 (Extended Profile causes decode errors)");
+            migrated = true;
+        }
+
+        if config.video_max_size == 0 {
+            config.video_max_size = 1920;
+            eprintln!("[HekaScreen] Config migration: video_max_size 0 → 1920 (Optimal for S20 FE 5G / low-latency)");
+            migrated = true;
+        }
+
+        if config.video_max_fps == 0 {
+            config.video_max_fps = 60;
+            eprintln!("[HekaScreen] Config migration: video_max_fps 0 → 60 (Standard gaming FPS limit)");
+            migrated = true;
+        }
+
+        if config.video_bit_rate == 8_000000 {
+            config.video_bit_rate = 16_000000;
+            eprintln!("[HekaScreen] Config migration: video_bit_rate 8M → 16M (Optimal H.265 gaming bitrate)");
+            migrated = true;
+        }
+
+        if config.config_version == 0 {
+            config.config_version = 1;
+            migrated = true;
+        }
+
+        // v1 → v2: disable vendor.qti-ext-enc-low-latency.enable
+        // This option triggers -fstack-protector stack corruption in
+        // OMX.qcom.video.encoder.hevc/.avc on Android 16 (SM-S916B).
+        // Force it off regardless of what the stored config says.
+        if config.config_version < 2 {
+            if config.video_qcom_low_latency {
+                config.video_qcom_low_latency = false;
+                eprintln!("[HekaScreen] Config migration v1→v2: video_qcom_low_latency forced to false (causes stack corruption on Android 16 Qualcomm encoder)");
+            }
+            config.config_version = 2;
+            migrated = true;
+        }
+
         *CONFIG.write().unwrap() = config;
+
+        if migrated {
+            if let Err(e) = Self::save() {
+                eprintln!("[HekaScreen] Failed to save migrated config: {}", e);
+            }
+        }
+
         Ok(())
     }
 
@@ -137,5 +220,14 @@ impl LocalConfig {
         (video_bit_rate, u32),
         (video_max_size, u32),
         (video_max_fps, u32),
+        (present_mode, String),
+        (video_codec_options, String),
+        (video_low_latency, bool),
+        (video_realtime_priority, bool),
+        (video_qcom_low_latency, bool),
+        (video_intra_refresh, bool),
+        (show_diagnostics, bool),
+        (config_version, u32),
+        (hw_decode, bool),
     );
 }

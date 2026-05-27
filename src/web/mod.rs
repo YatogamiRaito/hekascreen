@@ -7,12 +7,13 @@ use axum::{
     Json, Router,
     http::StatusCode,
     response::{IntoResponse, Response},
+    routing::get,
 };
 use rust_i18n::t;
 use serde::Serialize;
 use serde_json::Value;
 use std::{net::SocketAddrV4, thread};
-use tokio::sync::{broadcast, mpsc::UnboundedSender, oneshot};
+use tokio::{fs, sync::{broadcast, mpsc::UnboundedSender, oneshot}};
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::{
@@ -82,6 +83,11 @@ impl Server {
         ws_tx: broadcast::Sender<WebSocketNotification>,
     ) -> Router {
         let router = Router::new()
+            // Serve index.html with Cache-Control: no-store so the browser never
+            // caches the entry point. JS/CSS assets have content hashes in their
+            // filenames (Vite build) so they are naturally cache-busted.
+            .route("/", get(serve_index))
+            .route("/index.html", get(serve_index))
             .fallback_service(
                 ServeDir::new(relate_to_root_path(["assets", "web"])).not_found_service(
                     ServeFile::new(relate_to_root_path(["assets", "web", "index.html"])),
@@ -109,6 +115,24 @@ impl Server {
         }
         #[cfg(not(debug_assertions))]
         return router;
+    }
+}
+
+/// Serves index.html with `Cache-Control: no-store` so the browser always
+/// fetches a fresh copy. Without this, browsers cache the HTML and keep
+/// loading stale JS bundles even after a new build.
+async fn serve_index() -> impl IntoResponse {
+    let path = relate_to_root_path(["assets", "web", "index.html"]);
+    match fs::read(&path).await {
+        Ok(bytes) => (
+            [
+                ("Content-Type", "text/html; charset=utf-8"),
+                ("Cache-Control", "no-store"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
 

@@ -45,7 +45,7 @@ impl Binary {
         let len_bytes = len.to_be_bytes();
         buf.extend_from_slice(&len_bytes);
         // then [len] bytes for the string
-        buf.extend_from_slice(utf8.as_bytes())
+        buf.extend_from_slice(&utf8.as_bytes()[..len as usize])
     }
 
     // truncate utf8 string to max_len bytes
@@ -55,7 +55,7 @@ impl Binary {
             return len;
         }
         let mut len = max_len;
-        while utf8.is_char_boundary(len) {
+        while !utf8.is_char_boundary(len) {
             len -= 1;
         }
         len

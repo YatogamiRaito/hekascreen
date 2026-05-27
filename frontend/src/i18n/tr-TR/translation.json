@@ -1,0 +1,317 @@
+{
+  "404": {
+    "title": "Görünüşe göre sayfa havaya uçtu.",
+    "back": "Ana Sayfaya Dön"
+  },
+  "sider": {
+    "devices": "Cihazlar",
+    "mappings": "Eşlemeler",
+    "settings": "Ayarlar"
+  },
+  "welcome": {
+    "main": "Scrcpy Mask'e Hoş Geldiniz 👏🏻"
+  },
+  "devices": {
+    "adbTools": {
+      "connect": {
+        "label": "Kablosuz bağlantı",
+        "btn": "Bağlan"
+      },
+      "title": "ADB Araçları",
+      "pair": {
+        "label": "Kablosuz eşleştirme",
+        "btn": "Eşleştir"
+      }
+    },
+    "controlledDevices": {
+      "name": "Ad",
+      "action": "Eylem",
+      "size": "Boyut",
+      "title": "Kontrol Edilen Cihazlar",
+      "mainDevice": "ana cihaz",
+      "actionInfo": "Daha fazla bilgi",
+      "actionClose": "Kontrolü durdur",
+      "actionReconnect": "Cihazı yeniden bağla"
+    },
+    "otherDevices": {
+      "title": "Diğer Cihazlar",
+      "status": "Durum",
+      "actionControl": "Cihazı kontrol et",
+      "video": "Video"
+    },
+    "common": {
+      "refresh": "Cihazları yenile"
+    },
+    "actions": {
+      "setDisplayPowerOn": "Ekranı aç",
+      "setDisplayPowerOff": "Ekranı kapat",
+      "volumeUp": "Sesi artır",
+      "volumeDown": "Sesi azalt",
+      "back": "Geri",
+      "home": "Ana Sayfa",
+      "appSwitch": "Uygulama geçişi"
+    }
+  },
+  "mappings": {
+    "common": {
+      "bind": {
+        "autoInputPlaceholder": "Düğme kaydını etkinleştirmek için çift tıklayın",
+        "settingLabel": "Bağla",
+        "settingManual": "Manuel",
+        "settingAuto": "Otomatik",
+        "manualSelectPlaceholder": "Bağlamaları Seçin"
+      },
+      "pointerId": {
+        "label": "İşaretçi Kimliği"
+      },
+      "note": {
+        "label": "Not"
+      },
+      "delete": {
+        "label": "Sil"
+      },
+      "refreshBackground": "Arka planı yenile",
+      "refreshBgFail": "Arka plan resmi yenilenemedi: {0}",
+      "refreshSuccess": "Arka plan resmi başarıyla yenilendi",
+      "noMainDevice": "Ana kontrollü cihaz bulunamadı, lütfen cihazlar sayfasından cihazı kontrol edin",
+      "copy": {
+        "label": "Kopyasını oluştur"
+      }
+    },
+    "singleTap": {
+      "setting": {
+        "title": "Eşleme Yapılandırması - Tek Tıklama",
+        "sync": "Senkronize et",
+        "duration": "Süre"
+      },
+      "name": "Tek Tıklama"
+    },
+    "repeatTap": {
+      "setting": {
+        "title": "Eşleme Yapılandırması - Tekrarlı Tıklama",
+        "duration": "Süre",
+        "interval": "Aralık"
+      },
+      "name": "Tekrarlı Tıklama"
+    },
+    "multipleTap": {
+      "setting": {
+        "title": "Eşleme Yapılandırması - Çoklu Tıklama",
+        "delete": "Sil",
+        "duration": "Süre",
+        "keepLastOne": "En az bir işlem tutulmalıdır!",
+        "wait": "Bekle",
+        "edit": "Düzenle",
+        "operations": "İşlem dizisi",
+        "operationsHelp": "Sol fare düğmesi ile sürükleyin ve sağ fare düğmesi ile ekleyin veya düzenleyin",
+        "back": "Geri"
+      },
+      "name": "Çoklu Tıklama"
+    },
+    "swipe": {
+      "setting": {
+        "keepLastOne": "En az bir işlem tutulmalıdır!",
+        "title": "Eşleme Yapılandırması - Kaydırma",
+        "positonsHelp": "Sol fare düğmesi ile sürükleyin ve sağ fare düğmesi ile ekleyin veya düzenleyin",
+        "edit": "Düzenle",
+        "delete": "Sil",
+        "positions": "Konum dizisi",
+        "back": "Geri"
+      },
+      "name": "Kaydırma"
+    },
+    "directionPad": {
+      "setting": {
+        "title": "Eşleme Yapılandırması - Yön Tuş Takımı",
+        "joyStick": "Analog Kol",
+        "button": "Düğme",
+        "xAxis": "X ekseni",
+        "yAxis": "Y ekseni",
+        "down": "Aşağı",
+        "initDuration": "İlk kaydırma süresi",
+        "left": "Sol",
+        "maxOffset": "Maksimum kayma",
+        "right": "Sağ",
+        "up": "Yukarı"
+      },
+      "name": "Yön Tuş Takımı"
+    },
+    "mouseCastSpell": {
+      "setting": {
+        "title": "Eşleme Yapılandırması - Fare Yetenek Kullanma",
+        "center": "Yetenek merkezi",
+        "scaleFactor": "Ölçek çarpanları",
+        "castRadius": "Yetenek menzili",
+        "dragRadius": "Sürükleme menzili",
+        "releaseMode": {
+          "label": "Bırakma zamanlaması",
+          "onRelease": "Bırakınca",
+          "onPress": "Basınca",
+          "onSecondPress": "İkinci Kez Basınca"
+        },
+        "castNoDirection": "Yönlendirmesiz yetenek",
+        "editLabel": "Gelişmiş düzenleme",
+        "edit": "Düzenle",
+        "editHelp": "Sol fare düğmesiyle sürükleyin ve sağ fare düğmesiyle düzenleyin",
+        "setCenter": "Merkez",
+        "back": "Geri"
+      },
+      "name": "Fare Yetenek Kullanma"
+    },
+    "padCastSpell": {
+      "setting": {
+        "button": "Düğme",
+        "down": "Aşağı",
+        "joyStick": "Analog Kol",
+        "left": "Sol",
+        "padBindLabel": "Gamepad ataması",
+        "right": "Sağ",
+        "title": "Eşleme Yapılandırması - Gamepad Yetenek Kullanma",
+        "up": "Yukarı",
+        "xAxis": "X ekseni",
+        "yAxis": "Y ekseni",
+        "dragRadius": "Sürükleme menzili",
+        "block": "Yön tuş takımını engelle",
+        "releaseMode": {
+          "label": "Bırakma zamanlaması",
+          "onRelease": "Bırakınca",
+          "onSecondPress": "İkinci Kez Basınca"
+        }
+      },
+      "name": "Gamepad Yetenek Kullanma"
+    },
+    "cancelCast": {
+      "setting": {
+        "title": "Eşleme Yapılandırması - Yetenek İptal"
+      },
+      "name": "Yetenek İptal"
+    },
+    "fire": {
+      "setting": {
+        "sensitivity": "Hassasiyet",
+        "title": "Eşleme Yapılandırması - Ateş Etme"
+      },
+      "name": "Ateş Etme"
+    },
+    "fps": {
+      "setting": {
+        "sensitivity": "Hassasiyet",
+        "title": "Eşleme Yapılandırması - FPS"
+      },
+      "name": "Fps"
+    },
+    "observation": {
+      "setting": {
+        "sensitivity": "Hassasiyet",
+        "title": "Eşleme Yapılandırması - Gözlem"
+      },
+      "name": "Gözlem"
+    },
+    "rawInput": {
+      "setting": {
+        "title": "Eşleme Yapılandırması - Doğrudan Giriş"
+      },
+      "name": "Doğrudan Giriş"
+    },
+    "home": {
+      "emptyBind": "Bağlama yapılandırması olmayan düğmeler var!",
+      "activate": "Aktifleştir",
+      "manage": "Yönet",
+      "refresh": "Yenile",
+      "restore": "Geri Yükle",
+      "save": "Kaydet",
+      "action": "Eylem",
+      "active": "Aktif",
+      "create": "Oluştur",
+      "delete": "Sil",
+      "duplicate": "Kopyala",
+      "edit": "Düzenle",
+      "file": "Dosya",
+      "manager": "Yapılandırma yönetimi",
+      "migration": "Mevcut ana cihaz boyutuna taşı",
+      "editing": "Düzenleniyor",
+      "rename": "Yeniden Adlandır",
+      "confirmNo": "Hayır",
+      "confirmYes": "Evet",
+      "createTitle": "Yeni bir yapılandırma oluştur",
+      "fileInputPlaceholder": "Lütfen yeni yapılandırma adını girin",
+      "renameTitle": "Yapılandırmayı yeniden adlandır",
+      "deletePrompt": "Bunu silmek istediğinizden emin misiniz?",
+      "deleteTitle": "Yapılandırmayı sil",
+      "migrationTitle": "Yapılandırmayı taşı",
+      "size": "Boyut",
+      "differentName": "Yeni yapılandırma adı mevcut yapılandırmayla aynı olamaz!",
+      "duplicateTitle": "Yapılandırmayı kopyala"
+    },
+    "script": {
+      "setting": {
+        "title": "Eşleme Yapılandırması - Betik",
+        "pressed_script": "Basıldığında tetiklenen betik",
+        "pressed_script_placeholder": "Kısayol tuşuna basıldığında bir kez yürütülür",
+        "interval": "Basılı tutma tekrarlama aralığı",
+        "run_script": "Betiği test et",
+        "held_script": "Basılı tutulduğunda tetiklenen betik",
+        "held_script_placeholder": "Kısayol tuşu basılı tutulurken tekrarlı şekilde yürütülür",
+        "released_script": "Bırakıldığında tetiklenen betik",
+        "released_script_placeholder": "Kısayol tuşu bırakıldığında bir kez yürütülür",
+        "result": "Çalışma sonucu"
+      },
+      "name": "Betik"
+    }
+  },
+  "settings": {
+    "title": {
+      "header": "Ayarlar",
+      "basic": "Temel",
+      "mask": "Maske",
+      "video": "Video",
+      "advance": "Gelişmiş"
+    },
+    "language": "Dil",
+    "webPort": "Web portu",
+    "controllerPort": "Denetleyici portu",
+    "adbPath": "Adb yolu",
+    "horizontalMaskWidth": "Yatay maske genişliği",
+    "horizontalMaskPosition": "Yatay maske konumu",
+    "verticalMaskHeight": "Dikey maske yüksekliği",
+    "verticalMaskPosition": "Dikey maske konumu",
+    "mappingLabelOpacity": "Eşleme etiketi opaklığı",
+    "clipboardSync": "Pano senkronizasyonu",
+    "videoCodec": "Video kodeği",
+    "videoBitRate": "Video bit hızı",
+    "videoMaxSize": "Video maksimum boyutu",
+    "zeroUnlimitedTip": "Sınırsız olması için 0 olarak ayarlayın",
+    "videoMaxFps": "Video maksimum FPS",
+    "presentMode": "Bevy Sunum Modu",
+    "presentModeTip": "Bevy'nin pencere sunum modunu yapılandırır. Mailbox veya AutoNoVsync pencere oluşturma gecikmesini en aza indirir.",
+    "presentModeOptions": {
+      "AutoVsync": "VSync Etkin (AutoVsync)",
+      "AutoNoVsync": "VSync Devre Dışı (AutoNoVsync)",
+      "Immediate": "Immediate (En düşük gecikme, ekran yırtılması)",
+      "Mailbox": "Mailbox (Hızlı VSync, ultra düşük gecikme, yırtılma yok)"
+    },
+    "videoCodecOptions": "Video Kodek Seçenekleri",
+    "videoCodecOptionsTip": "Android donanım video kodlayıcısı için özel biçim seçenekleri (örneğin Snapdragon'da latency=0,priority=0 veya vendor.qti-ext-enc-low-latency.enable=1).",
+    "lowLatencyParams": "Düşük Gecikme Optimizasyonları",
+    "lowLatencyParamsOptions": {
+      "lowLatency": "Standart Düşük Gecikme Modu",
+      "realtimePriority": "Gerçek Zamanlı Kodlayıcı Önceliği",
+      "qcomLowLatency": "Snapdragon Donanım Optimizasyonu",
+      "intraRefresh": "Intra-Refresh Modu"
+    },
+    "alwaysOnTop": "Maske her zaman üstte",
+    "showDiagnostics": "Performans Göstergesini Göster (HUD)",
+    "hwDecode": "Donanım Hızlandırmalı Kod Çözme (VAAPI)",
+    "openDataPath": "Veri yolunu aç",
+    "about": {
+      "title": "Hakkında",
+      "intro": "Android cihazınızı bir oyun emülatörü kullanıyormuş gibi kontrol etmenizi sağlayan Rust, Bevy ve React ile oluşturulmuş bir Scrcpy istemcisi.",
+      "currentVersion": "Mevcut sürüm",
+      "latestVersion": "En son sürüm",
+      "checkUpdate": "Güncellemeyi denetle",
+      "showUpdateDialog": "Güncelleme detayları",
+      "download": "İndir",
+      "cancel": "İptal"
+    }
+  }
+}

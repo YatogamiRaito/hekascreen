@@ -242,7 +242,9 @@ async fn handle_recv(
                         continue;
                     }
                 };
-                cs_tx.send(msg.into()).unwrap();
+                if let Err(e) = cs_tx.send(msg.into()) {
+                    log::warn!("[WebSocket] Failed to broadcast control message: {}", e);
+                }
             }
             Message::Close(_) => {
                 break;
