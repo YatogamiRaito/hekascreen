@@ -4,13 +4,13 @@ version = "0.7.3"
 edition = "2024"
 
 [dependencies]
-bevy = "0.16.1"
+bevy = { version = "0.17", features = ["serialize"] }
 log = { version = "0.4.27", features = [
     "max_level_debug",
     "release_max_level_info",
 ] }
-bevy_enhanced_input = "0.11.0"
-bevy-tokio-tasks = "0.16.0"
+bevy_enhanced_input = "0.19"
+bevy-tokio-tasks = "0.17.0"
 seq-macro = "0.3"
 paste = "1.0"
 strum = "0.27"

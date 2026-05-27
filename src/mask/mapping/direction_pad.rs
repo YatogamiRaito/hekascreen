@@ -10,7 +10,7 @@ use bevy::{
     },
     math::Vec2,
 };
-use bevy_enhanced_input::prelude::Actions;
+use bevy_enhanced_input::prelude::ActionValue;
 use bevy_tokio_tasks::TokioTasksRuntime;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
@@ -19,7 +19,7 @@ use crate::{
     mask::mapping::{
         binding::{DirectionBinding, ValidateMappingConfig},
         config::ActiveMappingConfig,
-        input_actions::MappingContext,
+        input_actions::ActionEntityMap,
         utils::{ControlMsgHelper, MIN_MOVE_STEP_INTERVAL, Position, ease_sigmoid_like},
     },
     scrcpy::constant::MotionEventAction,
@@ -114,7 +114,8 @@ fn scale_direction_2d_state(d_state: Vec2, mapping: &BindMappingDirectionPad) ->
 pub struct BlockDirectionPad(pub bool);
 
 pub fn handle_direction_pad(
-    actions_q: Query<&Actions<MappingContext>>,
+    entity_map: Res<ActionEntityMap>,
+    value_q: Query<&ActionValue>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     runtime: ResMut<TokioTasksRuntime>,
@@ -125,10 +126,6 @@ pub fn handle_direction_pad(
         return;
     }
 
-    let Ok(actions) = actions_q.single() else {
-        return;
-    };
-
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("DirectionPad") {
@@ -136,7 +133,7 @@ pub fn handle_direction_pad(
                 let key = action.to_string();
                 let original_size: Vec2 = active_mapping.original_size.into();
                 let state = scale_direction_2d_state(
-                    action.direction_2d(actions),
+                    action.direction_2d(&entity_map, &value_q),
                     mapping,
                 );
                 if direction_pad_map.0.contains_key(&key) {

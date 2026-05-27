@@ -4,7 +4,7 @@ use bevy::{
     ecs::system::{Query, Res, ResMut},
     math::Vec2,
 };
-use bevy_enhanced_input::prelude::Actions;
+use bevy_enhanced_input::prelude::ActionEvents;
 use bevy_tokio_tasks::TokioTasksRuntime;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
@@ -13,7 +13,7 @@ use crate::{
     mask::mapping::{
         binding::{ButtonBinding, ValidateMappingConfig},
         config::ActiveMappingConfig,
-        input_actions::MappingContext,
+        input_actions::ActionEntityMap,
         utils::{ControlMsgHelper, MIN_MOVE_STEP_INTERVAL, Position, ease_sigmoid_like},
     },
     scrcpy::constant::MotionEventAction,
@@ -60,20 +60,18 @@ impl ValidateMappingConfig for MappingSwipe {
 }
 
 pub fn handle_swipe(
-    actions_q: Query<&Actions<MappingContext>>,
+    entity_map: Res<ActionEntityMap>,
+    events_q: Query<&ActionEvents>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     runtime: ResMut<TokioTasksRuntime>,
 ) {
-    let Ok(actions) = actions_q.single() else {
-        return;
-    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("Swipe") {
                 let mapping = mapping.as_ref_swipe();
                 let original_size: Vec2 = active_mapping.original_size.into();
-                if action.just_pulsed(actions) {
+                if action.just_pulsed(&entity_map, &events_q) {
                     let cs_tx = cs_tx_res.0.clone();
                     let pointer_id = mapping.pointer_id;
                     let points = mapping.positions.clone();

@@ -8,7 +8,7 @@ use bevy::{
     math::Vec2,
     time::{Time, Timer, TimerMode},
 };
-use bevy_enhanced_input::prelude::Actions;
+use bevy_enhanced_input::prelude::ActionEvents;
 use bevy_tokio_tasks::TokioTasksRuntime;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ use crate::{
         binding::{ButtonBinding, ValidateMappingConfig},
         config::ActiveMappingConfig,
         cursor::CursorPosition,
-        input_actions::MappingContext,
+        input_actions::ActionEntityMap,
         script_helper::ScriptAST,
         utils::Position,
     }, mask_command::MaskSize},
@@ -125,7 +125,8 @@ impl ValidateMappingConfig for MappingScript {
 }
 
 pub fn handle_script(
-    actions_q: Query<&Actions<MappingContext>>,
+    entity_map: Res<ActionEntityMap>,
+    events_q: Query<&ActionEvents>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     v_tx_res: Res<ChannelSenderV>,
@@ -134,9 +135,6 @@ pub fn handle_script(
     runtime: ResMut<TokioTasksRuntime>,
     mut active_map: ResMut<ActiveScriptMap>,
 ) {
-    let Ok(actions) = actions_q.single() else {
-        return;
-    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("Script") {
@@ -148,7 +146,7 @@ pub fn handle_script(
                 let mask_size = mask_size_res.0;
                 let interval = Duration::from_millis(mapping.interval as u64);
 
-                if action.just_activated(actions) {
+                if action.just_activated(&entity_map, &events_q) {
                     let _ = v_tx.send(VideoMsg::ScriptClearError);
                     if let Some(ref err) = mapping.pressed_script_ast.parse_error {
                         let _ = v_tx.send(VideoMsg::ScriptError { error: err.clone() });
@@ -189,7 +187,7 @@ pub fn handle_script(
                             },
                         );
                     }
-                } else if action.just_deactivated(actions) {
+                } else if action.just_deactivated(&entity_map, &events_q) {
                     if !mapping.held_script_ast.empty {
                         active_map.0.remove(action.as_ref());
                     }

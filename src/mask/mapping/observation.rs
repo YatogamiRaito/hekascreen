@@ -7,7 +7,7 @@ use bevy::{
     },
     math::Vec2,
 };
-use bevy_enhanced_input::prelude::Actions;
+use bevy_enhanced_input::prelude::ActionEvents;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
             binding::{ButtonBinding, ValidateMappingConfig},
             config::ActiveMappingConfig,
             cursor::CursorPosition,
-            input_actions::MappingContext,
+            input_actions::ActionEntityMap,
             utils::{ControlMsgHelper, Position},
         },
         mask_command::MaskSize,
@@ -93,21 +93,19 @@ pub fn handle_observation_trigger(
 }
 
 pub fn handle_observation(
-    actions_q: Query<&Actions<MappingContext>>,
+    entity_map: Res<ActionEntityMap>,
+    events_q: Query<&ActionEvents>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     mask_size: Res<MaskSize>,
     cursor_pos: Res<CursorPosition>,
     mut active_map: ResMut<ActiveObservation>,
 ) {
-    let Ok(actions) = actions_q.single() else {
-        return;
-    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("Observation") {
                 let mapping = mapping.as_ref_observation();
-                if action.just_activated(actions) {
+                if action.just_activated(&entity_map, &events_q) {
                     let original_size: Vec2 = active_mapping.original_size.into();
                     let original_pos: Vec2 = mapping.position.into();
                     let sensitivity: Vec2 = (mapping.sensitivity_x, mapping.sensitivity_y).into();
@@ -131,7 +129,7 @@ pub fn handle_observation(
                             sensitivity,
                         },
                     );
-                } else if action.just_deactivated(actions) {
+                } else if action.just_deactivated(&entity_map, &events_q) {
                     if let Some(item) = active_map.0.remove(action.as_ref()) {
                         // touch up
                         let delta = (cursor_pos.0 - item.start_cursor_pos) * item.sensitivity;

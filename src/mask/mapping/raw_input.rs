@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use bevy::{
     ecs::{
-        event::EventReader,
+        event::MessageReader,
         resource::Resource,
         system::{Commands, Query, Res, ResMut},
     },
@@ -14,7 +14,7 @@ use bevy::{
     platform::collections::HashMap,
     state::state::NextState,
 };
-use bevy_enhanced_input::prelude::Actions;
+use bevy_enhanced_input::prelude::ActionEvents;
 use copypasta::{ClipboardContext, ClipboardProvider};
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
@@ -24,7 +24,7 @@ use crate::{
         MappingState,
         binding::{ButtonBinding, ValidateMappingConfig},
         config::ActiveMappingConfig,
-        input_actions::MappingContext,
+        input_actions::ActionEntityMap,
         utils::{ControlMsgHelper, Position},
     },
     scrcpy::constant,
@@ -63,17 +63,15 @@ pub struct MappingRawInput {
 impl ValidateMappingConfig for MappingRawInput {}
 
 pub fn handle_raw_input(
-    actions_q: Query<&Actions<MappingContext>>,
+    entity_map: Res<ActionEntityMap>,
+    events_q: Query<&ActionEvents>,
     active_mapping: Res<ActiveMappingConfig>,
     mut next_state: ResMut<NextState<MappingState>>,
 ) {
-    let Ok(actions) = actions_q.single() else {
-        return;
-    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, _) in &active_mapping.mappings {
             if action.as_ref().starts_with("RawInput") {
-                if action.just_pulsed(actions) {
+                if action.just_pulsed(&entity_map, &events_q) {
                     next_state.set(MappingState::RawInput);
                     log::info!("[Mapping] {}", t!("mask.mapping.rawInputModeHint"));
                     return;

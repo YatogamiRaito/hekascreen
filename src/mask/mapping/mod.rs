@@ -26,7 +26,10 @@ use crate::{
             load_mapping_config, save_mapping_config,
         },
         cursor::{CursorPlugins, CursorState},
-        input_actions::MappingContext,
+        input_actions::{
+            ActionEntityMap, MappingContext, RebuildInputBindings,
+            ScrollDownCondition, ScrollUpCondition,
+        },
     },
     utils::relate_to_data_path,
 };
@@ -46,8 +49,14 @@ impl Plugin for MappingPlugins {
         app.add_plugins((EnhancedInputPlugin, CursorPlugins))
             .insert_state(MappingState::Stop)
             .insert_resource(ActiveMappingConfig(None, String::new()))
+            .insert_resource(ActionEntityMap::default())
+            // Register MappingContext as an input context (evaluated every PreUpdate).
             .add_input_context::<MappingContext>()
-            .add_observer(input_actions::setup_bindings)
+            // Register custom scroll conditions so bei can discover them on binding entities.
+            .add_input_condition::<ScrollDownCondition>()
+            .add_input_condition::<ScrollUpCondition>()
+            // Observer: rebuild all action/binding entities when config changes.
+            .add_observer(input_actions::on_rebuild_input_bindings)
             .add_systems(
                 Startup,
                 (
@@ -147,7 +156,9 @@ fn init(mut commands: Commands, mut active_mapping: ResMut<ActiveMappingConfig>)
         };
     active_mapping.0 = Some(bind_mapping_config);
     active_mapping.1 = file;
-    // Spawn the Actions entity — the Binding<MappingContext> observer will
-    // read ActiveMappingConfig and set up all input bindings.
-    commands.spawn(Actions::<MappingContext>::default());
+
+    // Spawn the global MappingContext entity, then trigger a rebuild so that
+    // on_rebuild_input_bindings populates ActionEntityMap from ActiveMappingConfig.
+    commands.spawn(MappingContext);
+    commands.trigger(RebuildInputBindings);
 }

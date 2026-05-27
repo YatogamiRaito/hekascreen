@@ -1,5 +1,4 @@
 use bevy::{prelude::*, window::{WindowLevel, PrimaryWindow}};
-use bevy_enhanced_input::prelude::RebuildBindings;
 use rust_i18n::t;
 
 use crate::{
@@ -9,6 +8,7 @@ use crate::{
             ActiveMappingConfig, MappingConfig, load_mapping_config, validate_mapping_config,
         },
         cursor::{CursorPosition, CursorState},
+        input_actions::RebuildInputBindings,
         script_helper::ScriptAST,
     },
     utils::{ChannelReceiverM, ChannelSenderCS, ChannelSenderV},
@@ -243,7 +243,7 @@ pub fn handle_mask_command(
                     Ok(mapping_config) => {
                         active_mapping.0 = Some(mapping_config);
                         active_mapping.1 = file_name;
-                        commands.trigger(RebuildBindings);
+                        commands.trigger(RebuildInputBindings);
                         oneshot_tx.send(Ok(String::new())).unwrap();
                     }
                     Err(e) => {

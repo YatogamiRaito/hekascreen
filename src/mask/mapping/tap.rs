@@ -8,7 +8,7 @@ use bevy::{
     math::Vec2,
     time::{Time, Timer, TimerMode},
 };
-use bevy_enhanced_input::prelude::Actions;
+use bevy_enhanced_input::prelude::ActionEvents;
 use bevy_tokio_tasks::TokioTasksRuntime;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
@@ -18,7 +18,7 @@ use crate::{
         mapping::{
             binding::{ButtonBinding, ValidateMappingConfig},
             config::ActiveMappingConfig,
-            input_actions::MappingContext,
+            input_actions::ActionEntityMap,
             utils::{ControlMsgHelper, Position},
         },
         mask_command::MaskSize,
@@ -67,20 +67,18 @@ pub struct MappingSingleTap {
 impl ValidateMappingConfig for MappingSingleTap {}
 
 pub fn handle_single_tap(
-    actions_q: Query<&Actions<MappingContext>>,
+    entity_map: Res<ActionEntityMap>,
+    events_q: Query<&ActionEvents>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     runtime: ResMut<TokioTasksRuntime>,
 ) {
-    let Ok(actions) = actions_q.single() else {
-        return;
-    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("SingleTap") {
                 let original_size: Vec2 = active_mapping.original_size.into();
                 let mapping = mapping.as_ref_singletap();
-                if action.just_activated(actions) {
+                if action.just_activated(&entity_map, &events_q) {
                     if mapping.sync {
                         // Tap down sync
                         ControlMsgHelper::send_touch(
@@ -115,7 +113,7 @@ pub fn handle_single_tap(
                             );
                         });
                     }
-                } else if mapping.sync && action.just_deactivated(actions) {
+                } else if mapping.sync && action.just_deactivated(&entity_map, &events_q) {
                     // Tap up sync
                     ControlMsgHelper::send_touch(
                         &cs_tx_res.0,
@@ -213,18 +211,16 @@ pub fn handle_repeat_tap_trigger(
 }
 
 pub fn handle_repeat_tap(
-    actions_q: Query<&Actions<MappingContext>>,
+    entity_map: Res<ActionEntityMap>,
+    events_q: Query<&ActionEvents>,
     active_mapping: Res<ActiveMappingConfig>,
     mut active_map: ResMut<ActiveRepeatTapMap>,
 ) {
-    let Ok(actions) = actions_q.single() else {
-        return;
-    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("RepeatTap") {
                 let mapping = mapping.as_ref_repeattap();
-                if action.just_activated(actions) {
+                if action.just_activated(&entity_map, &events_q) {
                     let interval = Duration::from_millis(mapping.interval as u64);
                     let original_size: Vec2 = active_mapping.original_size.into();
                     let mut timer = Timer::new(interval, TimerMode::Repeating);
@@ -239,7 +235,7 @@ pub fn handle_repeat_tap(
                             duration: Duration::from_millis(mapping.duration as u64),
                         },
                     );
-                } else if action.just_deactivated(actions) {
+                } else if action.just_deactivated(&entity_map, &events_q) {
                     active_map.0.remove(action.as_ref());
                 }
             }
@@ -291,20 +287,18 @@ impl ValidateMappingConfig for MappingMultipleTap {
 }
 
 pub fn handle_multiple_tap(
-    actions_q: Query<&Actions<MappingContext>>,
+    entity_map: Res<ActionEntityMap>,
+    events_q: Query<&ActionEvents>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     mask_size: Res<MaskSize>,
     runtime: ResMut<TokioTasksRuntime>,
 ) {
-    let Ok(actions) = actions_q.single() else {
-        return;
-    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("MultipleTap") {
                 let mapping = mapping.as_ref_multipletap();
-                if action.just_pulsed(actions) {
+                if action.just_pulsed(&entity_map, &events_q) {
                     let cs_tx = cs_tx_res.0.clone();
                     let original_size = mask_size.0;
                     let pointer_id = mapping.pointer_id;

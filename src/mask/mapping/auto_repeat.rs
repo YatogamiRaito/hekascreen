@@ -1,12 +1,12 @@
 use bevy::ecs::system::{Query, Res};
-use bevy_enhanced_input::prelude::Actions;
+use bevy_enhanced_input::prelude::ActionEvents;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     mask::mapping::{
         binding::{ButtonBinding, ValidateMappingConfig},
         config::ActiveMappingConfig,
-        input_actions::MappingContext,
+        input_actions::ActionEntityMap,
         utils::Position,
     },
     utils::ChannelSenderCS,
@@ -61,18 +61,16 @@ impl ValidateMappingConfig for MappingAutoRepeat {
 }
 
 pub fn handle_auto_repeat(
-    actions_q: Query<&Actions<MappingContext>>,
+    entity_map: Res<ActionEntityMap>,
+    events_q: Query<&ActionEvents>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
 ) {
-    let Ok(actions) = actions_q.single() else {
-        return;
-    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("AutoRepeat") {
                 let mapping = mapping.as_ref_autorepeat();
-                if action.just_pulsed(actions) {
+                if action.just_pulsed(&entity_map, &events_q) {
                     let target = &mapping.target_key;
                     if crate::mask::mapping::script_helper::is_repeating(target) {
                         crate::mask::mapping::script_helper::stop_repeat(target);

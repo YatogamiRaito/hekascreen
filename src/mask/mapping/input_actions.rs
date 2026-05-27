@@ -1,10 +1,18 @@
 //! bevy_enhanced_input action types and MappingContext for the key-mapping overlay.
 //!
-//! This module replaces bevy_ineffable with bevy_enhanced_input 0.11.0 (Bevy 0.16).
-//! 480 action unit structs (15 mapping types × 32 slots) are generated via seq_macro.
+//! Updated for bevy_enhanced_input 0.19 (Bevy 0.17):
+//!   - `MappingContext` is now `#[derive(Component)]` (plain component, not a special context)
+//!   - Action structs use `#[action_output(T)]` (not `#[input_action(output = T)]`)
+//!   - Conditions and modifiers are ECS Components on action/binding entities
+//!   - Pull-style dispatch via `ActionEntityMap` resource + `Query<&ActionEvents>` / `Query<&ActionValue>`
+//!   - `on_rebuild_input_bindings` observer rebuilds all action/binding entities on config reload
+
+use std::collections::HashMap;
 
 use bevy::prelude::*;
-use bevy_enhanced_input::{action_map::ActionMap, prelude::*};
+use bevy_enhanced_input::prelude::*;
+// Disambiguate from any bevy::prelude types of the same name:
+use bevy_enhanced_input::prelude::{Press, Release};
 use seq_macro::seq;
 
 use crate::mask::mapping::{
@@ -12,7 +20,7 @@ use crate::mask::mapping::{
     config::{ActiveMappingConfig, MappingAction},
 };
 
-// ── 480 InputAction unit structs ────────────────────────────────────────────
+// ── 480 InputAction unit structs ─────────────────────────────────────────────
 //
 // 15 types × 32 slots:
 //   bool output (13): SingleTap, RepeatTap, MultipleTap, Swipe,
@@ -22,90 +30,102 @@ use crate::mask::mapping::{
 seq!(N in 1..=32 {
     #(
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct SingleTap~N;
 
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct RepeatTap~N;
 
-        /// JustPress: fires once on key press.
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct MultipleTap~N;
 
-        /// JustPress: fires once on key press.
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct Swipe~N;
 
-        /// Vec2 output (screen coords: right=+X, down=+Y).
         #[derive(Debug, InputAction)]
-        #[input_action(output = Vec2)]
+        #[action_output(Vec2)]
         pub struct DirectionPad~N;
 
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct MouseCastSpell~N;
 
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct PadCastSpell~N;
 
-        /// Vec2 output for the directional pad portion of PadCastSpell.
         #[derive(Debug, InputAction)]
-        #[input_action(output = Vec2)]
+        #[action_output(Vec2)]
         pub struct PadCastDirection~N;
 
-        /// JustPress: fires once on key press.
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct CancelCast~N;
 
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct Observation~N;
 
-        /// JustPress: fires once on key press (toggle FPS mode).
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct Fps~N;
 
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct Fire~N;
 
-        /// Release: fires once on key *release* (enters raw-input mode).
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct RawInput~N;
 
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct Script~N;
 
-        /// JustPress: fires once on key press (toggle auto-repeat).
         #[derive(Debug, InputAction)]
-        #[input_action(output = bool)]
+        #[action_output(bool)]
         pub struct AutoRepeat~N;
     )*
 });
 
-// ── Input context ────────────────────────────────────────────────────────────
-#[derive(Debug, InputContext)]
+// ── Input context ─────────────────────────────────────────────────────────────
+/// Marker component for the single global input-mapping context entity.
+/// Registered as an input context in `MappingPlugins`.
+#[derive(Component, Debug)]
 pub struct MappingContext;
 
-// ── Custom scroll-wheel conditions ──────────────────────────────────────────
+// ── Resources & events ────────────────────────────────────────────────────────
 
-/// Fires (`ActionState::Fired`) when the mouse wheel scrolls downward (Y < −0.1).
-#[derive(Debug, Clone, Default)]
+/// Maps each `MappingAction` variant to the entity of its spawned action.
+///
+/// Populated (and cleared) by `on_rebuild_input_bindings` whenever the active
+/// mapping config changes.  Handler systems query this map together with
+/// `Query<&ActionEvents>` / `Query<&ActionValue>` for pull-style dispatch.
+#[derive(Resource, Default)]
+pub struct ActionEntityMap(pub HashMap<MappingAction, Entity>);
+
+/// Send this event (via `commands.trigger(RebuildInputBindings)`) to despawn the
+/// old action/binding entities and respawn them from the current
+/// `ActiveMappingConfig`.
+#[derive(Event, Debug)]
+pub struct RebuildInputBindings;
+
+// ── Custom scroll-wheel conditions ───────────────────────────────────────────
+
+/// Fires when the mouse wheel scrolls **downward** (Y < −0.1).
+///
+/// Must be registered with `app.add_input_condition::<ScrollDownCondition>()`.
+#[derive(Debug, Clone, Default, Component)]
 pub struct ScrollDownCondition;
 
 impl InputCondition for ScrollDownCondition {
     fn evaluate(
         &mut self,
-        _action_map: &ActionMap,
-        _time: &Time<Virtual>,
+        _actions: &ActionsQuery,
+        _time: &ContextTime,
         value: ActionValue,
     ) -> ActionState {
         if value.as_axis2d().y < -0.1 {
@@ -116,15 +136,17 @@ impl InputCondition for ScrollDownCondition {
     }
 }
 
-/// Fires (`ActionState::Fired`) when the mouse wheel scrolls upward (Y > 0.1).
-#[derive(Debug, Clone, Default)]
+/// Fires when the mouse wheel scrolls **upward** (Y > 0.1).
+///
+/// Must be registered with `app.add_input_condition::<ScrollUpCondition>()`.
+#[derive(Debug, Clone, Default, Component)]
 pub struct ScrollUpCondition;
 
 impl InputCondition for ScrollUpCondition {
     fn evaluate(
         &mut self,
-        _action_map: &ActionMap,
-        _time: &Time<Virtual>,
+        _actions: &ActionsQuery,
+        _time: &ContextTime,
         value: ActionValue,
     ) -> ActionState {
         if value.as_axis2d().y > 0.1 {
@@ -135,370 +157,333 @@ impl InputCondition for ScrollUpCondition {
     }
 }
 
-// ── Binding helpers ──────────────────────────────────────────────────────────
+// ── Internal binding helpers ─────────────────────────────────────────────────
 
-enum BindCondition {
-    /// No condition: action fires every frame the button is held.
-    Continuous,
-    /// [`JustPress`]: fires exactly once on key press.
-    JustPress,
-    /// [`Release`]: fires exactly once on key release.
-    Release,
-}
-
-/// Convert a `MergedButton` to a bevy_enhanced_input `Input`.
+/// Convert a `MergedButton` to a bevy_enhanced_input `Binding`.
 /// Returns `None` for scroll variants (handled separately).
-fn merged_to_input(btn: &MergedButton) -> Option<Input> {
+fn merged_to_binding(btn: &MergedButton) -> Option<Binding> {
     match btn {
-        MergedButton::Mouse(mb) => Some(Input::from(*mb)),
-        MergedButton::Keyboard(kc) => Some(Input::from(*kc)),
-        MergedButton::GamePad(gb) => Some(Input::from(*gb)),
+        MergedButton::Mouse(mb) => Some(Binding::from(*mb)),
+        MergedButton::Keyboard(kc) => Some(Binding::from(*kc)),
+        MergedButton::GamePad(gb) => Some(Binding::from(*gb)),
         MergedButton::ScrollDown | MergedButton::ScrollUp => None,
     }
 }
 
-/// Bind the first button of `binding` to `ab` using `cond`.
-///
-/// **Chord support is not yet implemented** — only the first key in a chord is
-/// used. A full chord implementation can be added later.
-fn bind_button(ab: &mut ActionBinding, binding: &ButtonBinding, cond: BindCondition) {
+/// Spawn a binding entity for the first button in `binding`, associated with
+/// `action_entity`.  Scroll buttons get `ScrollDownCondition`/`ScrollUpCondition`
+/// as a component on the binding entity.
+fn spawn_button_bindings(commands: &mut Commands, action_entity: Entity, binding: &ButtonBinding) {
     let first = match binding.0.first() {
         Some(b) => b,
         None => return,
     };
-
     match first {
         MergedButton::ScrollDown => {
-            let base = Input::mouse_wheel().with_conditions(ScrollDownCondition);
-            match cond {
-                BindCondition::Continuous => {
-                    ab.to(base);
-                }
-                BindCondition::JustPress => {
-                    ab.to(base.with_conditions(JustPress::default()));
-                }
-                BindCondition::Release => {
-                    ab.to(base.with_conditions(Release::default()));
-                }
-            }
+            commands.spawn((
+                Binding::mouse_wheel(),
+                ScrollDownCondition,
+                BindingOf(action_entity),
+            ));
         }
         MergedButton::ScrollUp => {
-            let base = Input::mouse_wheel().with_conditions(ScrollUpCondition);
-            match cond {
-                BindCondition::Continuous => {
-                    ab.to(base);
-                }
-                BindCondition::JustPress => {
-                    ab.to(base.with_conditions(JustPress::default()));
-                }
-                BindCondition::Release => {
-                    ab.to(base.with_conditions(Release::default()));
-                }
-            }
+            commands.spawn((
+                Binding::mouse_wheel(),
+                ScrollUpCondition,
+                BindingOf(action_entity),
+            ));
         }
-        other => {
-            if let Some(input) = merged_to_input(&other) {
-                let ib = InputBinding::new(input);
-                match cond {
-                    BindCondition::Continuous => {
-                        ab.to(ib);
-                    }
-                    BindCondition::JustPress => {
-                        ab.to(ib.with_conditions(JustPress::default()));
-                    }
-                    BindCondition::Release => {
-                        ab.to(ib.with_conditions(Release::default()));
-                    }
-                }
+        btn => {
+            if let Some(b) = merged_to_binding(btn) {
+                commands.spawn((b, BindingOf(action_entity)));
             }
         }
     }
 }
 
-/// Bind a `DirectionBinding` to a Vec2 action.
+/// Spawn binding entities for a `DirectionBinding`, associated with
+/// `action_entity`.
 ///
-/// Screen-coordinate convention preserved from bevy_ineffable:
-///   right button → X = +1   (east)
-///   left  button → X = −1   (west)
-///   down  button → Y = +1   (screen-down = "north" in Cardinal math)
-///   up    button → Y = −1   (screen-up   = "south" in Cardinal math)
-fn bind_direction(ab: &mut ActionBinding, dir: &DirectionBinding) {
+/// Screen-coordinate convention (preserved from the old bevy_ineffable setup):
+///   right → X = +1  (east)
+///   left  → X = −1  (west)
+///   down  → Y = +1  (screen-down; SwizzleAxis::YXZ maps Axis1D to Vec2.y)
+///   up    → Y = −1  (screen-up;   Negate + SwizzleAxis::YXZ)
+fn spawn_direction_bindings(
+    commands: &mut Commands,
+    action_entity: Entity,
+    dir: &DirectionBinding,
+) {
     match dir {
-        DirectionBinding::Button {
-            up,
-            down,
-            left,
-            right,
-        } => {
-            // down → +Y (north): SwizzleAxis::YXZ moves Axis1D(1) → Vec2{0, 1}
-            if let Some(input) = down.0.first().and_then(merged_to_input) {
-                ab.to(InputBinding::new(input).with_modifiers(SwizzleAxis::YXZ));
+        DirectionBinding::Button { up, down, left, right } => {
+            // down → +Y
+            if let Some(b) = down.0.first().and_then(|b| merged_to_binding(b)) {
+                commands.spawn((b, SwizzleAxis::YXZ, BindingOf(action_entity)));
             }
-            // up → −Y (south): Negate then SwizzleAxis → Vec2{0, −1}
-            if let Some(input) = up.0.first().and_then(merged_to_input) {
-                ab.to(InputBinding::new(input).with_modifiers((Negate::all(), SwizzleAxis::YXZ)));
+            // up → −Y
+            if let Some(b) = up.0.first().and_then(|b| merged_to_binding(b)) {
+                commands.spawn((b, Negate::all(), SwizzleAxis::YXZ, BindingOf(action_entity)));
             }
-            // right → +X (east): no modifier needed
-            if let Some(input) = right.0.first().and_then(merged_to_input) {
-                ab.to(InputBinding::new(input));
+            // right → +X (no modifier)
+            if let Some(b) = right.0.first().and_then(|b| merged_to_binding(b)) {
+                commands.spawn((b, BindingOf(action_entity)));
             }
-            // left → −X (west): Negate all
-            if let Some(input) = left.0.first().and_then(merged_to_input) {
-                ab.to(InputBinding::new(input).with_modifiers(Negate::all()));
+            // left → −X
+            if let Some(b) = left.0.first().and_then(|b| merged_to_binding(b)) {
+                commands.spawn((b, Negate::all(), BindingOf(action_entity)));
             }
         }
         DirectionBinding::JoyStick { x, y } => {
-            // X axis stays on X; Y axis needs SwizzleAxis::YXZ to land on Y component
-            ab.to(Input::from(*x));
-            ab.to(Input::from(*y).with_modifiers(SwizzleAxis::YXZ));
+            // X axis stays on X
+            commands.spawn((Binding::from(*x), BindingOf(action_entity)));
+            // Y axis: SwizzleAxis::YXZ maps Axis1D value → Vec2.y
+            commands.spawn((Binding::from(*y), SwizzleAxis::YXZ, BindingOf(action_entity)));
         }
     }
 }
 
-// ── Runtime-dispatch helper methods on MappingAction ─────────────────────────
+// ── Pull-style dispatch helpers on MappingAction ─────────────────────────────
 //
-// These let handler systems call `action.just_activated(&actions)` etc. without
-// knowing the concrete action type at compile time.
-//
-// State semantics:
-//   just_activated  — continuous actions: ActionEvents::STARTED (None→Fired)
-//   just_deactivated — continuous actions: ActionEvents::COMPLETED (Fired→None)
-//   just_pulsed (JustPress) — ActionEvents::STARTED (None→Fired, once per press)
-//   just_pulsed (Release)  — ActionEvents::FIRED   (Ongoing→Fired, once per release)
-//   direction_2d — ActionValue::as_axis2d() of current value
+// These are called from handler systems:
+//   `action.just_activated(&entity_map, &events_q)`
+//   `action.just_deactivated(&entity_map, &events_q)`
+//   `action.just_pulsed(&entity_map, &events_q)`
+//   `action.direction_2d(&entity_map, &value_q)`
+
+impl MappingAction {
+    /// Returns `true` on the first frame a continuous action's key is pressed.
+    /// Checks `ActionEvents::STARTED` (set on None → Fired / None → Ongoing transitions).
+    #[inline]
+    pub fn just_activated(
+        &self,
+        entity_map: &ActionEntityMap,
+        events_q: &Query<&ActionEvents>,
+    ) -> bool {
+        entity_map
+            .0
+            .get(self)
+            .and_then(|&e| events_q.get(e).ok())
+            .map(|ev| ev.contains(ActionEvents::STARTED))
+            .unwrap_or(false)
+    }
+
+    /// Returns `true` on the first frame a continuous action's key is released.
+    /// Checks `ActionEvents::COMPLETED` (set on Fired → None transition).
+    #[inline]
+    pub fn just_deactivated(
+        &self,
+        entity_map: &ActionEntityMap,
+        events_q: &Query<&ActionEvents>,
+    ) -> bool {
+        entity_map
+            .0
+            .get(self)
+            .and_then(|&e| events_q.get(e).ok())
+            .map(|ev| ev.contains(ActionEvents::COMPLETED))
+            .unwrap_or(false)
+    }
+
+    /// Returns the current 2-D directional value (screen coords: right=+X, down=+Y).
+    #[inline]
+    pub fn direction_2d(
+        &self,
+        entity_map: &ActionEntityMap,
+        value_q: &Query<&ActionValue>,
+    ) -> Vec2 {
+        entity_map
+            .0
+            .get(self)
+            .and_then(|&e| value_q.get(e).ok())
+            .map(|v| v.as_axis2d())
+            .unwrap_or(Vec2::ZERO)
+    }
+}
+
+// `just_pulsed` needs per-variant knowledge of the condition used:
+//   - `RawInput~N` uses a `Release` condition → fires on key *release*
+//     → `Ongoing → Fired` state transition → `ActionEvents::FIRED`
+//   - All other pulse actions (MultipleTap, Swipe, CancelCast, Fps, AutoRepeat)
+//     use a `Press` condition → fires on key *press*
+//     → `None → Fired` state transition → `ActionEvents::STARTED`
 seq!(N in 1..=32 {
     impl MappingAction {
-        /// Returns `true` on the first frame a continuous action's key is pressed.
-        pub fn just_activated(&self, actions: &Actions<MappingContext>) -> bool {
-            match self {
-                #(
-                    MappingAction::SingleTap~N => actions
-                        .get_action::<SingleTap~N>()
-                        .map(|a| a.events().contains(ActionEvents::STARTED))
-                        .unwrap_or(false),
-                    MappingAction::RepeatTap~N => actions
-                        .get_action::<RepeatTap~N>()
-                        .map(|a| a.events().contains(ActionEvents::STARTED))
-                        .unwrap_or(false),
-                    MappingAction::MouseCastSpell~N => actions
-                        .get_action::<MouseCastSpell~N>()
-                        .map(|a| a.events().contains(ActionEvents::STARTED))
-                        .unwrap_or(false),
-                    MappingAction::PadCastSpell~N => actions
-                        .get_action::<PadCastSpell~N>()
-                        .map(|a| a.events().contains(ActionEvents::STARTED))
-                        .unwrap_or(false),
-                    MappingAction::Observation~N => actions
-                        .get_action::<Observation~N>()
-                        .map(|a| a.events().contains(ActionEvents::STARTED))
-                        .unwrap_or(false),
-                    MappingAction::Fire~N => actions
-                        .get_action::<Fire~N>()
-                        .map(|a| a.events().contains(ActionEvents::STARTED))
-                        .unwrap_or(false),
-                    MappingAction::Script~N => actions
-                        .get_action::<Script~N>()
-                        .map(|a| a.events().contains(ActionEvents::STARTED))
-                        .unwrap_or(false),
-                )*
-                _ => false,
-            }
-        }
-
-        /// Returns `true` on the first frame a continuous action's key is released.
-        pub fn just_deactivated(&self, actions: &Actions<MappingContext>) -> bool {
-            match self {
-                #(
-                    MappingAction::SingleTap~N => actions
-                        .get_action::<SingleTap~N>()
-                        .map(|a| a.events().contains(ActionEvents::COMPLETED))
-                        .unwrap_or(false),
-                    MappingAction::RepeatTap~N => actions
-                        .get_action::<RepeatTap~N>()
-                        .map(|a| a.events().contains(ActionEvents::COMPLETED))
-                        .unwrap_or(false),
-                    MappingAction::MouseCastSpell~N => actions
-                        .get_action::<MouseCastSpell~N>()
-                        .map(|a| a.events().contains(ActionEvents::COMPLETED))
-                        .unwrap_or(false),
-                    MappingAction::PadCastSpell~N => actions
-                        .get_action::<PadCastSpell~N>()
-                        .map(|a| a.events().contains(ActionEvents::COMPLETED))
-                        .unwrap_or(false),
-                    MappingAction::Observation~N => actions
-                        .get_action::<Observation~N>()
-                        .map(|a| a.events().contains(ActionEvents::COMPLETED))
-                        .unwrap_or(false),
-                    MappingAction::Fire~N => actions
-                        .get_action::<Fire~N>()
-                        .map(|a| a.events().contains(ActionEvents::COMPLETED))
-                        .unwrap_or(false),
-                    MappingAction::Script~N => actions
-                        .get_action::<Script~N>()
-                        .map(|a| a.events().contains(ActionEvents::COMPLETED))
-                        .unwrap_or(false),
-                )*
-                _ => false,
-            }
-        }
-
-        /// Returns `true` on the trigger frame for a pulse-style action.
-        ///
-        /// - JustPress types (MultipleTap, Swipe, CancelCast, Fps, AutoRepeat):
-        ///   fires on key press (STARTED, None→Fired).
-        /// - Release type (RawInput):
-        ///   fires on key release (FIRED, Ongoing→Fired).
-        pub fn just_pulsed(&self, actions: &Actions<MappingContext>) -> bool {
-            match self {
-                #(
-                    MappingAction::MultipleTap~N => actions
-                        .get_action::<MultipleTap~N>()
-                        .map(|a| a.events().contains(ActionEvents::STARTED))
-                        .unwrap_or(false),
-                    MappingAction::Swipe~N => actions
-                        .get_action::<Swipe~N>()
-                        .map(|a| a.events().contains(ActionEvents::STARTED))
-                        .unwrap_or(false),
-                    MappingAction::CancelCast~N => actions
-                        .get_action::<CancelCast~N>()
-                        .map(|a| a.events().contains(ActionEvents::STARTED))
-                        .unwrap_or(false),
-                    MappingAction::Fps~N => actions
-                        .get_action::<Fps~N>()
-                        .map(|a| a.events().contains(ActionEvents::STARTED))
-                        .unwrap_or(false),
-                    MappingAction::AutoRepeat~N => actions
-                        .get_action::<AutoRepeat~N>()
-                        .map(|a| a.events().contains(ActionEvents::STARTED))
-                        .unwrap_or(false),
-                    // RawInput uses Release condition: FIRED fires on key release
-                    MappingAction::RawInput~N => actions
-                        .get_action::<RawInput~N>()
-                        .map(|a| a.events().contains(ActionEvents::FIRED))
-                        .unwrap_or(false),
-                )*
-                _ => false,
-            }
-        }
-
-        /// Returns the current 2D directional value (screen coords: right=+X, down=+Y).
-        pub fn direction_2d(&self, actions: &Actions<MappingContext>) -> Vec2 {
-            match self {
-                #(
-                    MappingAction::DirectionPad~N => actions
-                        .get_action::<DirectionPad~N>()
-                        .map(|a| a.value().as_axis2d())
-                        .unwrap_or(Vec2::ZERO),
-                    MappingAction::PadCastDirection~N => actions
-                        .get_action::<PadCastDirection~N>()
-                        .map(|a| a.value().as_axis2d())
-                        .unwrap_or(Vec2::ZERO),
-                )*
-                _ => Vec2::ZERO,
-            }
+        /// Returns `true` on the single trigger frame for a pulse-style action.
+        pub fn just_pulsed(
+            &self,
+            entity_map: &ActionEntityMap,
+            events_q: &Query<&ActionEvents>,
+        ) -> bool {
+            let flag = match self {
+                #( MappingAction::RawInput~N => ActionEvents::FIRED, )*
+                _ => ActionEvents::STARTED,
+            };
+            entity_map
+                .0
+                .get(self)
+                .and_then(|&e| events_q.get(e).ok())
+                .map(|ev| ev.contains(flag))
+                .unwrap_or(false)
         }
     }
 });
 
-// ── Binding observer ─────────────────────────────────────────────────────────
-
-// Observer that fires when `Actions<MappingContext>` is inserted or `RebuildBindings` triggers.
-// Sets up all action bindings from the current `ActiveMappingConfig`.
+// ── Binding observer ──────────────────────────────────────────────────────────
+//
+// Triggered by `commands.trigger(RebuildInputBindings)`.
+// Despawns old action/binding entities via `despawn_related`, then re-spawns
+// them from the current `ActiveMappingConfig`, populating `ActionEntityMap`.
 seq!(N in 1..=32 {
-    pub fn setup_bindings(
-        trigger: Trigger<Binding<MappingContext>>,
+    pub fn on_rebuild_input_bindings(
+        _trigger: On<RebuildInputBindings>,
+        mut commands: Commands,
+        context_q: Query<Entity, With<MappingContext>>,
         active_mapping: Res<ActiveMappingConfig>,
-        mut actions: Query<&mut Actions<MappingContext>>,
+        mut entity_map: ResMut<ActionEntityMap>,
     ) {
-        let Ok(mut actions) = actions.get_mut(trigger.target()) else {
-            return;
-        };
-        let Some(mapping) = &active_mapping.0 else {
-            return;
-        };
+        let Ok(context) = context_q.single() else { return; };
+
+        // Despawn all action entities (and their linked binding entities) from the
+        // previous config.  This is a no-op when called for the first time.
+        commands.entity(context).despawn_related::<Actions<MappingContext>>();
+        entity_map.0.clear();
+
+        let Some(mapping) = &active_mapping.0 else { return; };
 
         for (action, mapping_type) in &mapping.mappings {
             match action {
                 #(
-                    MappingAction::SingleTap~N => bind_button(
-                        actions.bind::<SingleTap~N>(),
-                        &mapping_type.as_ref_singletap().bind,
-                        BindCondition::Continuous,
-                    ),
-                    MappingAction::RepeatTap~N => bind_button(
-                        actions.bind::<RepeatTap~N>(),
-                        &mapping_type.as_ref_repeattap().bind,
-                        BindCondition::Continuous,
-                    ),
-                    MappingAction::MultipleTap~N => bind_button(
-                        actions.bind::<MultipleTap~N>(),
-                        &mapping_type.as_ref_multipletap().bind,
-                        BindCondition::JustPress,
-                    ),
-                    MappingAction::Swipe~N => bind_button(
-                        actions.bind::<Swipe~N>(),
-                        &mapping_type.as_ref_swipe().bind,
-                        BindCondition::JustPress,
-                    ),
-                    MappingAction::DirectionPad~N => bind_direction(
-                        actions.bind::<DirectionPad~N>(),
-                        &mapping_type.as_ref_directionpad().bind,
-                    ),
-                    MappingAction::MouseCastSpell~N => bind_button(
-                        actions.bind::<MouseCastSpell~N>(),
-                        &mapping_type.as_ref_mousecastspell().bind,
-                        BindCondition::Continuous,
-                    ),
+                    MappingAction::SingleTap~N => {
+                        let e = commands.spawn((
+                            Action::<SingleTap~N>::new(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, e, &mapping_type.as_ref_singletap().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
+                    MappingAction::RepeatTap~N => {
+                        let e = commands.spawn((
+                            Action::<RepeatTap~N>::new(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, e, &mapping_type.as_ref_repeattap().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
+                    MappingAction::MultipleTap~N => {
+                        let e = commands.spawn((
+                            Action::<MultipleTap~N>::new(),
+                            Press::default(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, e, &mapping_type.as_ref_multipletap().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
+                    MappingAction::Swipe~N => {
+                        let e = commands.spawn((
+                            Action::<Swipe~N>::new(),
+                            Press::default(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, e, &mapping_type.as_ref_swipe().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
+                    MappingAction::DirectionPad~N => {
+                        let e = commands.spawn((
+                            Action::<DirectionPad~N>::new(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_direction_bindings(&mut commands, e, &mapping_type.as_ref_directionpad().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
+                    MappingAction::MouseCastSpell~N => {
+                        let e = commands.spawn((
+                            Action::<MouseCastSpell~N>::new(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, e, &mapping_type.as_ref_mousecastspell().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
                     MappingAction::PadCastSpell~N => {
                         let m = mapping_type.as_ref_padcastspell();
-                        bind_button(
-                            actions.bind::<PadCastSpell~N>(),
-                            &m.bind,
-                            BindCondition::Continuous,
-                        );
-                        bind_direction(
-                            actions.bind::<PadCastDirection~N>(),
-                            &m.pad_bind,
-                        );
-                    }
+
+                        // Spawn the trigger-button action for the spell.
+                        let spell_e = commands.spawn((
+                            Action::<PadCastSpell~N>::new(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, spell_e, &m.bind);
+                        entity_map.0.insert(MappingAction::PadCastSpell~N, spell_e);
+
+                        // Spawn the directional action paired with this spell (always same slot N).
+                        let dir_e = commands.spawn((
+                            Action::<PadCastDirection~N>::new(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_direction_bindings(&mut commands, dir_e, &m.pad_bind);
+                        entity_map.0.insert(MappingAction::PadCastDirection~N, dir_e);
+                    },
                     MappingAction::PadCastDirection~N => {
-                        // Bound as part of PadCastSpell~N above; skip.
-                    }
-                    MappingAction::CancelCast~N => bind_button(
-                        actions.bind::<CancelCast~N>(),
-                        &mapping_type.as_ref_cancelcast().bind,
-                        BindCondition::JustPress,
-                    ),
-                    MappingAction::Observation~N => bind_button(
-                        actions.bind::<Observation~N>(),
-                        &mapping_type.as_ref_observation().bind,
-                        BindCondition::Continuous,
-                    ),
-                    MappingAction::Fps~N => bind_button(
-                        actions.bind::<Fps~N>(),
-                        &mapping_type.as_ref_fps().bind,
-                        BindCondition::JustPress,
-                    ),
-                    MappingAction::Fire~N => bind_button(
-                        actions.bind::<Fire~N>(),
-                        &mapping_type.as_ref_fire().bind,
-                        BindCondition::Continuous,
-                    ),
-                    MappingAction::RawInput~N => bind_button(
-                        actions.bind::<RawInput~N>(),
-                        &mapping_type.as_ref_rawinput().bind,
-                        BindCondition::Release,
-                    ),
-                    MappingAction::Script~N => bind_button(
-                        actions.bind::<Script~N>(),
-                        &mapping_type.as_ref_script().bind,
-                        BindCondition::Continuous,
-                    ),
-                    MappingAction::AutoRepeat~N => bind_button(
-                        actions.bind::<AutoRepeat~N>(),
-                        &mapping_type.as_ref_autorepeat().bind,
-                        BindCondition::JustPress,
-                    ),
+                        // Always spawned as part of PadCastSpell above; skip.
+                    },
+                    MappingAction::CancelCast~N => {
+                        let e = commands.spawn((
+                            Action::<CancelCast~N>::new(),
+                            Press::default(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, e, &mapping_type.as_ref_cancelcast().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
+                    MappingAction::Observation~N => {
+                        let e = commands.spawn((
+                            Action::<Observation~N>::new(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, e, &mapping_type.as_ref_observation().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
+                    MappingAction::Fps~N => {
+                        let e = commands.spawn((
+                            Action::<Fps~N>::new(),
+                            Press::default(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, e, &mapping_type.as_ref_fps().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
+                    MappingAction::Fire~N => {
+                        let e = commands.spawn((
+                            Action::<Fire~N>::new(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, e, &mapping_type.as_ref_fire().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
+                    MappingAction::RawInput~N => {
+                        let e = commands.spawn((
+                            Action::<RawInput~N>::new(),
+                            Release::default(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, e, &mapping_type.as_ref_rawinput().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
+                    MappingAction::Script~N => {
+                        let e = commands.spawn((
+                            Action::<Script~N>::new(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, e, &mapping_type.as_ref_script().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
+                    MappingAction::AutoRepeat~N => {
+                        let e = commands.spawn((
+                            Action::<AutoRepeat~N>::new(),
+                            Press::default(),
+                            ActionOf::<MappingContext>::new(context),
+                        )).id();
+                        spawn_button_bindings(&mut commands, e, &mapping_type.as_ref_autorepeat().bind);
+                        entity_map.0.insert(action.clone(), e);
+                    },
                 )*
             }
         }

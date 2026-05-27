@@ -174,8 +174,8 @@ fn check_for_update_system(runtime: ResMut<TokioTasksRuntime>) {
 
 #[cfg(target_os = "linux")]
 fn handle_close_requested(
-    mut events: EventReader<bevy::window::WindowCloseRequested>,
-    mut exit: EventWriter<AppExit>,
+    mut events: MessageReader<bevy::window::WindowCloseRequested>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     for _ in events.read() {
         exit.write(AppExit::default());
@@ -188,7 +188,7 @@ fn apply_present_mode_change(
 ) {
     let current = LocalConfig::get().present_mode.clone();
     if *last_mode != current {
-        if let Ok(mut window) = window_query.get_single_mut() {
+        if let Ok(mut window) = window_query.single_mut() {
             window.present_mode = match current.as_str() {
                 "AutoNoVsync" => PresentMode::AutoNoVsync,
                 "Immediate" => PresentMode::Immediate,

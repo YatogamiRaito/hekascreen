@@ -9,7 +9,7 @@ use bevy::{
     math::Vec2,
     state::state::{NextState, State},
 };
-use bevy_enhanced_input::prelude::Actions;
+use bevy_enhanced_input::prelude::ActionEvents;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +19,7 @@ use crate::{
             binding::{ButtonBinding, ValidateMappingConfig},
             config::ActiveMappingConfig,
             cursor::{ActiveCursorFpsConfig, CursorPosition, CursorState, FPS_MARGIN},
-            input_actions::MappingContext,
+            input_actions::ActionEntityMap,
             utils::{ControlMsgHelper, Position},
         },
         mask_command::MaskSize,
@@ -81,7 +81,8 @@ impl ValidateMappingConfig for MappingFps {
 }
 
 pub fn handle_fps(
-    actions_q: Query<&Actions<MappingContext>>,
+    entity_map: Res<ActionEntityMap>,
+    events_q: Query<&ActionEvents>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     mut fps_config: ResMut<ActiveCursorFpsConfig>,
@@ -90,13 +91,10 @@ pub fn handle_fps(
     cursor_pos: Res<CursorPosition>,
     mask_size: Res<MaskSize>,
 ) {
-    let Ok(actions) = actions_q.single() else {
-        return;
-    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("Fps") {
-                if action.just_pulsed(actions) {
+                if action.just_pulsed(&entity_map, &events_q) {
                     let original_size: Vec2 = active_mapping.original_size.into();
                     match state.get() {
                         CursorState::Normal => {
@@ -208,7 +206,8 @@ struct FireItem {
 }
 
 pub fn handle_fire(
-    actions_q: Query<&Actions<MappingContext>>,
+    entity_map: Res<ActionEntityMap>,
+    events_q: Query<&ActionEvents>,
     active_mapping: Res<ActiveMappingConfig>,
     cs_tx_res: Res<ChannelSenderCS>,
     mut fps_config: ResMut<ActiveCursorFpsConfig>,
@@ -216,14 +215,11 @@ pub fn handle_fire(
     mut cursor_pos: ResMut<CursorPosition>,
     mask_size: Res<MaskSize>,
 ) {
-    let Ok(actions) = actions_q.single() else {
-        return;
-    };
     if let Some(active_mapping) = &active_mapping.0 {
         for (action, mapping) in &active_mapping.mappings {
             if action.as_ref().starts_with("Fire") {
                 let mapping = mapping.as_ref_fire();
-                if action.just_activated(actions) {
+                if action.just_activated(&entity_map, &events_q) {
                     // stop fps motion
                     fps_config.ignore_fps_motion = true;
                     // touch up fps
@@ -256,7 +252,7 @@ pub fn handle_fire(
                             sensitivity,
                         },
                     );
-                } else if action.just_deactivated(actions) {
+                } else if action.just_deactivated(&entity_map, &events_q) {
                     if let Some(fire_item) = active_map.0.remove(action.as_ref()) {
                         // touch up fire
                         ControlMsgHelper::send_touch(
