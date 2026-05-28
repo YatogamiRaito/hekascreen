@@ -263,6 +263,7 @@ impl ScrcpyConnection {
             )) {
                 log::error!("[Controller] Failed to send DeviceConnectionChange connect: {}", e);
             } else {
+                crate::utils::wakeup_bevy();
                 let _ = oneshot_rx.await;
             }
         }
@@ -281,6 +282,7 @@ impl ScrcpyConnection {
             )) {
                 log::error!("[Controller] Failed to send DeviceConnectionChange disconnect: {}", e);
             } else {
+                crate::utils::wakeup_bevy();
                 let _ = oneshot_rx.await;
             }
         }

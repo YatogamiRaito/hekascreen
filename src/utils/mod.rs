@@ -3,6 +3,7 @@ pub mod share;
 use std::{
     env,
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
 use axum::http::{HeaderMap, HeaderValue};
@@ -93,6 +94,14 @@ pub struct VideoBufferRecycler(pub crossbeam_channel::Sender<Vec<u8>>);
 
 pub static LAST_INPUT_TIME_MICROS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+pub static WINIT_PROXY: OnceLock<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>> = OnceLock::new();
+
+pub fn wakeup_bevy() {
+    if let Some(proxy) = WINIT_PROXY.get() {
+        let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
+    }
+}
+
 #[derive(Resource, Clone)]
 pub struct LiveDiagnostics {
     // Per-frame perf counters (updated every decoded frame)
@@ -165,6 +174,7 @@ pub async fn mask_win_move_helper(
         oneshot_tx,
     ))
     .unwrap();
+    wakeup_bevy();
     oneshot_rx.await.unwrap().unwrap()
 }
 

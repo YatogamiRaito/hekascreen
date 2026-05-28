@@ -3,8 +3,10 @@ use std::{fs::File, net::SocketAddrV4, sync::OnceLock};
 use bevy::{
     log::{BoxedLayer, LogPlugin, tracing_subscriber::Layer},
     prelude::*,
-    window::{PresentMode, WindowLevel},
+    window::PresentMode,
 };
+#[cfg(not(target_os = "linux"))]
+use bevy::window::WindowLevel;
 use bevy_tokio_tasks::TokioTasksRuntime;
 use scrcpy_mask::{
     config::LocalConfig,
@@ -53,15 +55,13 @@ fn main() {
         println!("LocalConfig load failed. {}", e);
     }
 
-    let mut local_config = LocalConfig::get();
     // update language
-    let language = local_config.language;
+    let language = LocalConfig::get().language;
     match language.as_str() {
         "zh-CN" | "en-US" | "tr-TR" => rust_i18n::set_locale(&language),
         _ => {
             rust_i18n::set_locale(default_language);
             LocalConfig::set_language(default_language.to_string());
-            local_config = LocalConfig::get();
         }
     }
     // update config file
@@ -79,6 +79,8 @@ fn main() {
         exit_condition: bevy::window::ExitCondition::DontExit,
         ..default()
     };
+    #[cfg(not(target_os = "linux"))]
+    let local_config = LocalConfig::get();
     #[cfg(not(target_os = "linux"))]
     let window_plugin = WindowPlugin {
         primary_window: Some(Window {
@@ -148,7 +150,11 @@ fn macos_menu(executor: Res<bevy::ecs::schedule::MainThreadExecutor>) {
         .detach();
 }
 
-fn start_servers(mut commands: Commands) {
+fn start_servers(
+    mut commands: Commands,
+    event_loop_proxy: Res<bevy::winit::EventLoopProxyWrapper>,
+) {
+    let _ = scrcpy_mask::utils::WINIT_PROXY.set((*event_loop_proxy).clone());
     let config = LocalConfig::get();
     let web_addr: SocketAddrV4 = format!("127.0.0.1:{}", config.web_port).parse().unwrap();
     let controller_addr: SocketAddrV4 = format!("127.0.0.1:{}", config.controller_port)

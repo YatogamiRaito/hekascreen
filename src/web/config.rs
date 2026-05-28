@@ -186,6 +186,7 @@ async fn update_config(
                     log::error!("[WebServe] Failed to send WinSwitchLevel: {}", e);
                     return Err(WebServerError::internal_error(e.to_string()));
                 }
+                crate::utils::wakeup_bevy();
                 match oneshot_rx.await {
                     Ok(Ok(msg)) => return Ok(JsonResponse::success(msg, None)),
                     Ok(Err(e)) => return Err(WebServerError::bad_request(e)),

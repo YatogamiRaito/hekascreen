@@ -65,6 +65,7 @@ async fn change_active_mapping(
             oneshot_tx,
         ))
         .unwrap();
+    crate::utils::wakeup_bevy();
     match oneshot_rx.await.unwrap() {
         Ok(_) => {
             LocalConfig::set_active_mapping_file(payload.file.clone());
@@ -110,6 +111,7 @@ async fn validate_config(
         oneshot_tx,
     ))
     .unwrap();
+    crate::utils::wakeup_bevy();
     match oneshot_rx.await.unwrap() {
         Ok(_) => Ok(()),
         Err(e) => Err(e),
@@ -196,6 +198,7 @@ async fn delete_mapping(
         .m_tx
         .send((MaskCommand::GetActiveMapping, oneshot_tx))
         .unwrap();
+    crate::utils::wakeup_bevy();
     let file = oneshot_rx.await.unwrap().unwrap();
     if file == payload.file {
         return bad_request(t!("web.mapping.cannotDeleteActiveMapping").to_string());
@@ -293,6 +296,7 @@ async fn rename_mapping(
         .m_tx
         .send((MaskCommand::GetActiveMapping, oneshot_tx))
         .unwrap();
+    crate::utils::wakeup_bevy();
     let file = oneshot_rx.await.unwrap().unwrap();
     if file == payload.file {
         // if active, set new active mapping
@@ -306,6 +310,7 @@ async fn rename_mapping(
                 oneshot_tx,
             ))
             .unwrap();
+        crate::utils::wakeup_bevy();
         match oneshot_rx.await.unwrap() {
             Ok(_) => {
                 LocalConfig::set_active_mapping_file(payload.new_file.clone());
@@ -441,6 +446,7 @@ async fn update_mapping(
         .m_tx
         .send((MaskCommand::GetActiveMapping, oneshot_tx))
         .unwrap();
+    crate::utils::wakeup_bevy();
     let file = oneshot_rx.await.unwrap().unwrap();
     if file == payload.file {
         // if active, refresh active mapping
@@ -454,6 +460,7 @@ async fn update_mapping(
                 oneshot_tx,
             ))
             .unwrap();
+        crate::utils::wakeup_bevy();
         match oneshot_rx.await.unwrap() {
             Ok(_) => {
                 LocalConfig::set_active_mapping_file(payload.file.clone());
@@ -513,6 +520,7 @@ async fn get_mapping_list(
         .m_tx
         .send((MaskCommand::GetActiveMapping, oneshot_tx))
         .unwrap();
+    crate::utils::wakeup_bevy();
     let file = oneshot_rx.await.unwrap().unwrap();
 
     Ok(JsonResponse::success(
