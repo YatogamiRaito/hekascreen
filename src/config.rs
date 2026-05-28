@@ -41,6 +41,7 @@ pub struct LocalConfig {
     pub video_bit_rate: u32,
     pub video_max_size: u32,
     pub video_max_fps: u32,
+    pub video_i_frame_interval: u32,
     pub present_mode: String,
     pub video_codec_options: String,
     pub video_low_latency: bool,
@@ -85,6 +86,7 @@ impl Default for LocalConfig {
             video_bit_rate: 16_000000, // 16M
             video_max_size: 1920,      // default 1920
             video_max_fps: 60,         // default 60
+            video_i_frame_interval: 10,
             present_mode: "Mailbox".to_string(),
             video_codec_options: "".to_string(),
             video_low_latency: true,
@@ -200,6 +202,11 @@ impl LocalConfig {
             migrated = true;
             eprintln!("[HekaScreen] Config validation: video_bit_rate cannot be 0, reset to 16,000,000");
         }
+        if config.video_i_frame_interval == 0 {
+            config.video_i_frame_interval = 10;
+            migrated = true;
+            eprintln!("[HekaScreen] Config validation: video_i_frame_interval cannot be 0, reset to 10");
+        }
         if config.mapping_label_opacity < 0.0 || config.mapping_label_opacity > 1.0 {
             config.mapping_label_opacity = 0.3;
             migrated = true;
@@ -258,6 +265,7 @@ impl LocalConfig {
         (video_realtime_priority, bool),
         (video_qcom_low_latency, bool),
         (video_intra_refresh, bool),
+        (video_i_frame_interval, u32),
         (show_diagnostics, bool),
         (config_version, u32),
         (hw_decode, bool),

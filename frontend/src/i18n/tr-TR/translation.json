@@ -290,6 +290,8 @@
     "videoMaxSize": "Video maksimum boyutu",
     "zeroUnlimitedTip": "Sınırsız olması için 0 olarak ayarlayın",
     "videoMaxFps": "Video maksimum FPS",
+    "videoIFrameInterval": "Video I-frame aralığı",
+    "videoIFrameIntervalTip": "Anahtar kareler (I-frame) arasındaki saniye cinsinden süre. Düşük değerler akış bozulmalarından daha hızlı kurtulmayı sağlar ancak bit hızını biraz artırır.",
     "presentMode": "Bevy Sunum Modu",
     "presentModeTip": "Bevy'nin pencere sunum modunu yapılandırır. Mailbox veya AutoNoVsync pencere oluşturma gecikmesini en aza indirir.",
     "presentModeOptions": {

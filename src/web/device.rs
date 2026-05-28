@@ -228,6 +228,9 @@ async fn _control_device(
             if local_config.video_max_fps > 0 {
                 args.push(format!("max_fps={}", local_config.video_max_fps));
             }
+            if local_config.video_i_frame_interval > 0 {
+                args.push(format!("video_i_frame_interval={}", local_config.video_i_frame_interval));
+            }
             let mut codec_opts = Vec::new();
             if local_config.video_low_latency {
                 codec_opts.push("latency=0".to_string());

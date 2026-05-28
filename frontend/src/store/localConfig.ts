@@ -61,6 +61,7 @@ export interface LocalConfigState {
   videoQcomLowLatency: boolean;
   videoIntraRefresh: boolean;
   showDiagnostics: boolean;
+  videoIFrameInterval: number;
   hwDecode: boolean;
 }
 
@@ -88,6 +89,7 @@ const initialState: LocalConfigState = {
   videoQcomLowLatency: false,
   videoIntraRefresh: false,
   showDiagnostics: true,
+  videoIFrameInterval: 10,
   hwDecode: false,
 };
 
@@ -196,6 +198,10 @@ const localConfigSlice = createSlice({
       state.showDiagnostics = action.payload;
       updateLocalConfig("show_diagnostics", action.payload);
     },
+    setVideoIFrameInterval: (state, action: PayloadAction<number>) => {
+      state.videoIFrameInterval = action.payload;
+      updateLocalConfig("video_i_frame_interval", action.payload);
+    },
     setHwDecode: (state, action: PayloadAction<boolean>) => {
       state.hwDecode = action.payload;
       updateLocalConfig("hw_decode", action.payload);
@@ -228,6 +234,7 @@ export const {
   setVideoQcomLowLatency,
   setVideoIntraRefresh,
   setShowDiagnostics,
+  setVideoIFrameInterval,
   setHwDecode,
 } = localConfigSlice.actions;
 

@@ -290,6 +290,8 @@
     "videoMaxSize": "Video max size",
     "zeroUnlimitedTip": "Set to 0 for unlimited",
     "videoMaxFps": "Video max FPS",
+    "videoIFrameInterval": "Video I-frame interval",
+    "videoIFrameIntervalTip": "The interval between keyframes (I-frames) in seconds. Lower values allow faster recovery from stream corruption but increase bitrate slightly.",
     "presentMode": "Bevy Presentation Mode",
     "presentModeTip": "Configures Bevy's window presentation mode. Mailbox or AutoNoVsync minimizes window rendering latency.",
     "presentModeOptions": {

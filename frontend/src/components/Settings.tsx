@@ -31,6 +31,7 @@ import {
   setVideoBitRate,
   setVideoMaxSize,
   setVideoMaxFps,
+  setVideoIFrameInterval,
   setAlwaysOnTop,
   setPresentMode,
   setVideoCodecOptions,
@@ -313,6 +314,18 @@ export default function Settings() {
               min={0}
               value={localConfig.videoMaxFps}
               onChange={(v) => v !== null && dispatch(setVideoMaxFps(v))}
+            />
+          </ItemBox>
+          <ItemBox
+            label={t("settings.videoIFrameInterval")}
+            tooltip={t("settings.videoIFrameIntervalTip")}
+          >
+            <InputNumber
+              className="w-sm"
+              controls={false}
+              min={1}
+              value={localConfig.videoIFrameInterval}
+              onChange={(v) => v !== null && dispatch(setVideoIFrameInterval(v))}
             />
           </ItemBox>
           <ItemBox

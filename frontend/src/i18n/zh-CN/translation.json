@@ -290,6 +290,8 @@
     "videoMaxSize": "视频最大尺寸",
     "zeroUnlimitedTip": "设为 0 表示无限制",
     "videoMaxFps": "视频最大FPS",
+    "videoIFrameInterval": "视频 I 帧间隔",
+    "videoIFrameIntervalTip": "关键帧（I 帧）之间的间隔（以秒为单位）。较低的值有助于从画面损坏中更快恢复，但会略微增加码率。",
     "presentMode": "Bevy 渲染呈现模式",
     "presentModeTip": "配置 Bevy 窗口的的渲染呈现方式。Mailbox 或 AutoNoVsync 可最大限度地减少窗口渲染延迟。",
     "presentModeOptions": {
