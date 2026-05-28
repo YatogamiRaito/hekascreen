@@ -187,6 +187,10 @@ fn apply_present_mode_change(
     mut last_mode: Local<String>,
 ) {
     let current = LocalConfig::get().present_mode.clone();
+    if last_mode.is_empty() {
+        *last_mode = current.clone();
+        return;
+    }
     if *last_mode != current {
         if let Ok(mut window) = window_query.single_mut() {
             window.present_mode = match current.as_str() {
