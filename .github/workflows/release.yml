@@ -75,8 +75,8 @@ jobs:
         id: ffmpeg-cache
         uses: actions/cache@v4
         with:
-          path: ffmpeg-7.1.2/ffmpeg-${{ matrix.platform }}
-          key: ffmpeg-${{ matrix.platform }}-7.1.2-v0.4
+          path: ffmpeg-8.1.1/ffmpeg-${{ matrix.platform }}
+          key: ffmpeg-${{ matrix.platform }}-8.1.1-v0.1
 
       - name: Download and build FFmpeg (if not cached)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -84,11 +84,11 @@ jobs:
         run: |
           OS=${{ matrix.platform }}
           
-          curl -L -o FFmpeg-n7.1.2.tar.gz https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n7.1.2.tar.gz
-          tar -xzf FFmpeg-n7.1.2.tar.gz
-          rm FFmpeg-n7.1.2.tar.gz
-          mv FFmpeg-n7.1.2 ffmpeg-7.1.2
-          cd ffmpeg-7.1.2
+          curl -L -o FFmpeg-n8.1.1.tar.gz https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n8.1.1.tar.gz
+          tar -xzf FFmpeg-n8.1.1.tar.gz
+          rm FFmpeg-n8.1.1.tar.gz
+          mv FFmpeg-n8.1.1 ffmpeg-8.1.1
+          cd ffmpeg-8.1.1
 
           ./configure --prefix=./ffmpeg-$OS \
               --disable-all --disable-doc --disable-iconv \
@@ -112,7 +112,7 @@ jobs:
           $OS = "${{ matrix.platform }}"
           $Prefix = "ffmpeg-$OS"
           $ProjectName = "scrcpy-mask"
-          $FFMpeg = "ffmpeg-7.1.2"
+          $FFMpeg = "ffmpeg-8.1.1"
           
           $env:PKG_CONFIG_PATH = "$ScriptDir\$FFMpeg\$Prefix\lib\pkgconfig"
           $env:FFMPEG_DIR = "$ScriptDir\$FFMpeg\$Prefix"
@@ -164,8 +164,8 @@ jobs:
         id: ffmpeg-cache
         uses: actions/cache@v4
         with:
-          path: ffmpeg-7.1.2/ffmpeg-${{ matrix.platform }}
-          key: ffmpeg-${{ matrix.platform }}-7.1.2-v0.4
+          path: ffmpeg-8.1.1/ffmpeg-${{ matrix.platform }}
+          key: ffmpeg-${{ matrix.platform }}-8.1.1-v0.1
 
       - name: Download and build FFmpeg (if not cached)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -173,11 +173,11 @@ jobs:
         run: |
           OS=${{ matrix.platform }}
           
-          curl -L -o FFmpeg-n7.1.2.tar.gz https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n7.1.2.tar.gz
-          tar -xzf FFmpeg-n7.1.2.tar.gz
-          rm FFmpeg-n7.1.2.tar.gz
-          mv FFmpeg-n7.1.2 ffmpeg-7.1.2
-          cd ffmpeg-7.1.2
+          curl -L -o FFmpeg-n8.1.1.tar.gz https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n8.1.1.tar.gz
+          tar -xzf FFmpeg-n8.1.1.tar.gz
+          rm FFmpeg-n8.1.1.tar.gz
+          mv FFmpeg-n8.1.1 ffmpeg-8.1.1
+          cd ffmpeg-8.1.1
 
           ./configure --prefix=./ffmpeg-$OS \
               --disable-all --disable-doc --disable-iconv \
@@ -197,7 +197,7 @@ jobs:
         shell: bash
         run: |
           SCRIPT_DIR="${{ github.workspace }}"
-          FFMPEG="ffmpeg-7.1.2"
+          FFMPEG="ffmpeg-8.1.1"
           OS="${{ matrix.platform }}"
           PREFIX="ffmpeg-$OS"
           PROJECT_NAME="scrcpy-mask"
@@ -275,8 +275,8 @@ jobs:
         id: ffmpeg-cache
         uses: actions/cache@v4
         with:
-          path: ffmpeg-7.1.2/ffmpeg-${{ matrix.platform }}
-          key: ffmpeg-${{ matrix.platform }}-7.1.2-v0.4
+          path: ffmpeg-8.1.1/ffmpeg-${{ matrix.platform }}
+          key: ffmpeg-${{ matrix.platform }}-8.1.1-v0.1
 
       - name: Download and build FFmpeg (if not cached)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -300,11 +300,11 @@ jobs:
 
           OS=${{ matrix.platform }}
           
-          curl -L -o FFmpeg-n7.1.2.tar.gz https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n7.1.2.tar.gz
-          tar -xzf FFmpeg-n7.1.2.tar.gz
-          rm FFmpeg-n7.1.2.tar.gz
-          mv FFmpeg-n7.1.2 ffmpeg-7.1.2
-          cd ffmpeg-7.1.2
+          curl -L -o FFmpeg-n8.1.1.tar.gz https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n8.1.1.tar.gz
+          tar -xzf FFmpeg-n8.1.1.tar.gz
+          rm FFmpeg-n8.1.1.tar.gz
+          mv FFmpeg-n8.1.1 ffmpeg-8.1.1
+          cd ffmpeg-8.1.1
 
           ./configure --prefix=./ffmpeg-$OS \
               --disable-all --disable-doc --disable-iconv \
@@ -326,7 +326,7 @@ jobs:
           sudo apt-get update
 
           SCRIPT_DIR="${{ github.workspace }}"
-          FFMPEG="ffmpeg-7.1.2"
+          FFMPEG="ffmpeg-8.1.1"
           OS="${{ matrix.platform }}"
           PREFIX="ffmpeg-$OS"
           PROJECT_NAME="scrcpy-mask"

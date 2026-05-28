@@ -2,7 +2,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FFMPEG="ffmpeg-7.1.2"
+FFMPEG="ffmpeg-8.1.1"
 
 if [[ "$(uname)" == "Darwin" ]]; then
     echo "Building for MacOS arm64"

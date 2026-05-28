@@ -143,6 +143,61 @@ impl fmt::Display for VideoCodec {
     }
 }
 
+pub struct HwDeviceContext {
+    raw: *mut ffmpeg_next::ffi::AVBufferRef,
+}
+
+impl HwDeviceContext {
+    pub fn create_vaapi() -> Result<Self, String> {
+        let mut raw = std::ptr::null_mut();
+        let ret = unsafe {
+            ffmpeg_next::ffi::av_hwdevice_ctx_create(
+                &mut raw,
+                ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if ret >= 0 {
+            Ok(Self { raw })
+        } else {
+            Err(format!("VAAPI hardware device creation failed (ret={})", ret))
+        }
+    }
+
+    pub fn as_ptr(&self) -> *mut ffmpeg_next::ffi::AVBufferRef {
+        self.raw
+    }
+}
+
+impl Drop for HwDeviceContext {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            unsafe {
+                ffmpeg_next::ffi::av_buffer_unref(&mut self.raw);
+            }
+        }
+    }
+}
+
+unsafe impl Send for HwDeviceContext {}
+
+fn transfer_hw_frame(src: &frame::Video, dst: &mut frame::Video) -> Result<(), String> {
+    let ret = unsafe {
+        ffmpeg_next::ffi::av_hwframe_transfer_data(
+            dst.as_mut_ptr(),
+            src.as_ptr(),
+            0,
+        )
+    };
+    if ret >= 0 {
+        Ok(())
+    } else {
+        Err(format!("av_hwframe_transfer_data failed: {}", ret))
+    }
+}
+
 pub struct VideoDecoder {
     pub decoder: decoder::Video,
     pub scaler: Option<scaling::Context>,
@@ -151,26 +206,15 @@ pub struct VideoDecoder {
     pub frame_size: usize,
     pub must_merge_config: bool,
     pub packet_merger: PacketMerger,
-    pub hw_device_ctx: *mut ffmpeg_next::ffi::AVBufferRef,
+    pub hw_device_ctx: Option<HwDeviceContext>,
     pub cpu_frame: frame::Video,
     pub rgba_frame: frame::Video,
 }
 
-// Safety: VideoDecoder contains raw pointers (*mut AVBufferRef) which are not automatically Send.
-// However, the raw pointer points to a thread-safe FFmpeg hardware device context that is only
-// ever dereferenced or modified inside the single-threaded video decoder run loop (connection.rs).
-// No concurrent access to these raw pointers occurs, making VideoDecoder safe to transfer (Send) across threads.
+// Safety: VideoDecoder contains scaling::Context and raw FFmpeg bindings,
+// which are not automatically Send. However, it is only accessed in a
+// single-threaded execution loop (connection.rs) after initialization.
 unsafe impl Send for VideoDecoder {}
-
-impl Drop for VideoDecoder {
-    fn drop(&mut self) {
-        if !self.hw_device_ctx.is_null() {
-            unsafe {
-                ffmpeg_next::ffi::av_buffer_unref(&mut self.hw_device_ctx);
-            }
-        }
-    }
-}
 
 impl VideoDecoder {
     pub fn new(codec_id: VideoCodec, width: u32, height: u32) -> Result<Self, String> {
@@ -188,21 +232,14 @@ impl VideoDecoder {
         codec_context.set_threading(threading);
         codec_context.set_flags(flags);
 
-        let mut hw_device_ctx: *mut ffmpeg_next::ffi::AVBufferRef = std::ptr::null_mut();
+        let mut hw_context = None;
         let mut using_hw = false;
 
         if crate::config::LocalConfig::get().hw_decode {
-            unsafe {
-                let ret = ffmpeg_next::ffi::av_hwdevice_ctx_create(
-                    &mut hw_device_ctx,
-                    ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI,
-                    std::ptr::null(), // auto-select
-                    std::ptr::null_mut(),
-                    0,
-                );
-                if ret >= 0 {
-                    // Find hw_pix_fmt (AV_PIX_FMT_VAAPI) by looping with avcodec_get_hw_config()
-                    let mut hw_pix_fmt = ffmpeg_next::ffi::AVPixelFormat::AV_PIX_FMT_NONE;
+            if let Ok(ctx) = HwDeviceContext::create_vaapi() {
+                // Find hw_pix_fmt (AV_PIX_FMT_VAAPI) by looping with avcodec_get_hw_config()
+                let mut hw_pix_fmt = ffmpeg_next::ffi::AVPixelFormat::AV_PIX_FMT_NONE;
+                unsafe {
                     let raw_codec = sw_codec.as_ptr();
                     let mut i = 0;
                     loop {
@@ -211,8 +248,8 @@ impl VideoDecoder {
                             break;
                         }
                         let config = &*config;
-                        if // AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX = 0x01
-                        (config.methods & 0x01) != 0 && config.device_type == ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI {
+                        let method = ffmpeg_next::ffi::AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX as i32;
+                        if (config.methods & method) != 0 && config.device_type == ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI {
                             hw_pix_fmt = config.pix_fmt;
                             break;
                         }
@@ -221,18 +258,18 @@ impl VideoDecoder {
 
                     if hw_pix_fmt != ffmpeg_next::ffi::AVPixelFormat::AV_PIX_FMT_NONE {
                         // Attach the hardware device context reference to the codec context
-                        (*codec_context.as_mut_ptr()).hw_device_ctx = ffmpeg_next::ffi::av_buffer_ref(hw_device_ctx);
+                        (*codec_context.as_mut_ptr()).hw_device_ctx = ffmpeg_next::ffi::av_buffer_ref(ctx.as_ptr());
                         // Set the get_format callback
                         (*codec_context.as_mut_ptr()).get_format = Some(get_hw_format);
                         using_hw = true;
                         log::info!("[HekaScreen] VAAPI hardware context configured with pixel format {:?}", hw_pix_fmt);
-                    } else {
-                        log::warn!("[HekaScreen] VAAPI hardware config not found for this codec, falling back to SW");
-                        ffmpeg_next::ffi::av_buffer_unref(&mut hw_device_ctx);
                     }
-                } else {
-                    eprintln!("[HekaScreen] VAAPI device init failed (ret={}), falling back to SW", ret);
                 }
+                if using_hw {
+                    hw_context = Some(ctx);
+                }
+            } else {
+                log::warn!("[HekaScreen] VAAPI hardware device creation failed, falling back to SW");
             }
         }
 
@@ -251,7 +288,7 @@ impl VideoDecoder {
             must_merge_config: matches!(codec_id, VideoCodec::H264 | VideoCodec::H265),
             packet_merger: PacketMerger::new(),
             frame_size: (width * height * 4) as usize,
-            hw_device_ctx,
+            hw_device_ctx: hw_context,
             cpu_frame: frame::Video::empty(),
             rgba_frame: frame::Video::empty(),
         })
@@ -261,7 +298,7 @@ impl VideoDecoder {
     /// This is the ground-truth check — the setting `hw_decode` in config only
     /// requests hardware decoding; `hw_active()` tells you whether it actually worked.
     pub fn hw_active(&self) -> bool {
-        !self.hw_device_ctx.is_null()
+        self.hw_device_ctx.is_some()
     }
 
     pub fn update(&mut self, frame: &frame::Video) -> bool {
@@ -274,12 +311,7 @@ impl VideoDecoder {
             let frame_format = unsafe {
                 let raw_frame = frame.as_ptr();
                 if (*raw_frame).format == ffmpeg_next::ffi::AVPixelFormat::AV_PIX_FMT_VAAPI as std::ffi::c_int {
-                    let ret = ffmpeg_next::ffi::av_hwframe_transfer_data(
-                        self.cpu_frame.as_mut_ptr(),
-                        raw_frame,
-                        0,
-                    );
-                    if ret >= 0 {
+                    if transfer_hw_frame(frame, &mut self.cpu_frame).is_ok() {
                         self.cpu_frame.format()
                     } else {
                         frame.format()
@@ -315,13 +347,8 @@ impl VideoDecoder {
         let frame_to_scale = unsafe {
             let raw_frame = decoded.as_ptr();
             if (*raw_frame).format == ffmpeg_next::ffi::AVPixelFormat::AV_PIX_FMT_VAAPI as std::ffi::c_int {
-                let ret = ffmpeg_next::ffi::av_hwframe_transfer_data(
-                    self.cpu_frame.as_mut_ptr(),
-                    raw_frame,
-                    0,
-                );
-                if ret < 0 {
-                    return Err(format!("Failed to transfer VAAPI hardware frame to CPU: {}", ret));
+                if let Err(e) = transfer_hw_frame(decoded, &mut self.cpu_frame) {
+                    return Err(format!("Failed to transfer VAAPI hardware frame to CPU: {}", e));
                 } else {
                     self.cpu_frame.set_pts(decoded.pts());
                     &self.cpu_frame

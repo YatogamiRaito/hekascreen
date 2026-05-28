@@ -7,5 +7,6 @@ fn main() {
         pkg_config::probe_library("libva-x11").expect("Failed to find libva-x11");
         pkg_config::probe_library("libva-drm").expect("Failed to find libva-drm");
         pkg_config::probe_library("libdrm").expect("Failed to find libdrm via pkg-config");
+        pkg_config::probe_library("zlib").expect("Failed to find zlib via pkg-config");
     }
 }

@@ -185,9 +185,9 @@ fn create_simple_label(
         Node {
             position_type: PositionType::Absolute,
             padding: UiRect::px(5., 5., 3., 3.),
+            border_radius: BorderRadius::all(Val::Px(3.)),
             ..default()
         },
-        BorderRadius::all(Val::Px(3.)),
         BackgroundColor(Color::BLACK),
         children![(
             Text::new(binding),
@@ -227,6 +227,7 @@ fn create_pad_label(
         flex_direction: FlexDirection::Column,
         justify_content: JustifyContent::Center,
         align_items: AlignItems::Center,
+        border_radius: BorderRadius::all(Val::Percent(50.)),
         ..default()
     };
 
@@ -254,7 +255,6 @@ fn create_pad_label(
             },
             LabelType::Pad,
             pad_node,
-            BorderRadius::all(Val::Percent(50.)),
             BackgroundColor(Color::BLACK),
         ))
         .with_children(|parent| {

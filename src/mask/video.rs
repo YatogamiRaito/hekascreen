@@ -238,10 +238,10 @@ pub fn update_diagnostics_hud(
                 left: Val::Px(10.),
                 top: Val::Px(10.),
                 padding: UiRect::all(Val::Px(5.)),
+                border_radius: BorderRadius::all(Val::Px(4.)),
                 ..default()
             },
             BackgroundColor(Color::srgba_u8(0, 0, 0, 150)),
-            BorderRadius::all(Val::Px(4.)),
             ZIndex(100),
         ));
         return;
