@@ -22,8 +22,11 @@ impl Plugin for BasicPlugin {
     }
 }
 
-fn setup(mut commands: Commands, mut window: Single<&mut Window>) {
-    window.resolution.set(800., 600.);
+fn setup(mut commands: Commands) {
+    // NOTE: Do NOT touch the Window component here. On X11, even a benign property
+    // write (e.g. resolution) on a hidden (unmapped) window is enough to trigger a
+    // ConfigureRequest, which some window managers respond to by mapping the window.
+    // The real size is set by MaskCommand::WinMove once a device connects.
     commands.spawn(Camera2d::default());
 }
 

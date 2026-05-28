@@ -89,6 +89,11 @@ fn main() {
                     },
                     resizable: true,
                     visible: false,
+                    // Prevent a spurious Window-Changed event: Window::default() has
+                    // focused:true, but an invisible window can never actually be
+                    // focused. Setting false here keeps the Bevy cache in sync so
+                    // changed_windows never fires a focus-related winit call at startup.
+                    focused: false,
                     window_level: if local_config.always_on_top {
                         WindowLevel::AlwaysOnTop
                     } else {
