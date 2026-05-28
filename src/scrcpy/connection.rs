@@ -29,6 +29,46 @@ use crate::{
     utils::{mask_win_move_helper, share::ControlledDevice},
 };
 
+pub fn parse_video_metadata_buf(
+    buf: &[u8; 12],
+    height_buf: Option<&[u8; 4]>,
+) -> Result<(VideoCodec, u32, u32), String> {
+    let raw_codec_id = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    let val2 = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
+    let val3 = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
+
+    let (width, height) = if (val2 & 0x80000000) != 0 {
+        if let Some(h_buf) = height_buf {
+            let width = val3;
+            let height = u32::from_be_bytes(*h_buf);
+            (width, height)
+        } else {
+            return Err("Missing height buffer for v3.0+ SessionMeta format".to_string());
+        }
+    } else {
+        let width = val2;
+        let height = val3;
+        (width, height)
+    };
+
+    let codec = match raw_codec_id {
+        SC_CODEC_ID_H264 => VideoCodec::H264,
+        SC_CODEC_ID_H265 => VideoCodec::H265,
+        SC_CODEC_ID_AV1 => VideoCodec::AV1,
+        _ => return Err(format!("Unknown video codec ID: 0x{:x}", raw_codec_id)),
+    };
+
+    Ok((codec, width, height))
+}
+
+pub fn parse_device_name(buf: &[u8]) -> String {
+    if let Ok(device_name_raw) = std::str::from_utf8(buf) {
+        device_name_raw.trim_end_matches(char::from(0)).to_string()
+    } else {
+        "INVALID_NAME".to_string()
+    }
+}
+
 pub struct ScrcpyConnection {
     pub socket: TcpStream,
 }
@@ -52,18 +92,11 @@ impl ScrcpyConnection {
                 t!("scrcpy.failedToReadControlMetadata")
             )),
             Ok(n) => {
-                let mut end = n;
-                while buf[end - 1] == 0 {
-                    end -= 1;
-                }
-                // update device name
-                if let Ok(device_name_raw) = std::str::from_utf8(&buf[..n]) {
-                    let device_name = device_name_raw.trim_end_matches(char::from(0));
-                    ControlledDevice::update_device_name(scid, device_name.to_string()).await;
-                } else {
+                let device_name = parse_device_name(&buf[..n]);
+                if device_name == "INVALID_NAME" {
                     log::warn!("[Controller] {}", t!("scrcpy.invalidDeviceName"));
-                    ControlledDevice::update_device_name(scid, "INVALID_NAME".to_string()).await;
                 }
+                ControlledDevice::update_device_name(scid, device_name).await;
                 Ok(())
             }
         }
@@ -304,51 +337,33 @@ impl ScrcpyConnection {
                 return;
             }
             Ok(_) => {
-                let raw_codec_id = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
                 let val2 = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
-                let val3 = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
-
-                let (width, height) = if (val2 & 0x80000000) != 0 {
-                    // New v3.0+ SessionMeta format (16 bytes total: codec_id, flags, width, height)
-                    let mut height_buf: [u8; 4] = [0; 4];
-                    if let Err(e) = self.socket.read_exact(&mut height_buf).await {
+                let height_buf = if (val2 & 0x80000000) != 0 {
+                    let mut h_buf: [u8; 4] = [0; 4];
+                    if let Err(e) = self.socket.read_exact(&mut h_buf).await {
                         log::error!("[Controller] Failed to read video height: {}", e);
                         return;
                     }
-                    let width = val3;
-                    let height = u32::from_be_bytes(height_buf);
-                    (width, height)
+                    Some(h_buf)
                 } else {
-                    // Old v2.x format (12 bytes total: codec_id, width, height)
-                    let width = val2;
-                    let height = val3;
-                    (width, height)
+                    None
                 };
 
-                log::info!("[Controller] Video dimensions: {}x{}", width, height);
-
-                let codec_id = match raw_codec_id {
-                    SC_CODEC_ID_H264 => {
-                        log::info!("[Controller] {}: H264", t!("scrcpy.videoCodec"));
-                        VideoCodec::H264
-                    }
-                    SC_CODEC_ID_H265 => {
-                        log::info!("[Controller] {}: H265", t!("scrcpy.videoCodec"));
-                        VideoCodec::H265
-                    }
-                    SC_CODEC_ID_AV1 => {
-                        log::info!("[Controller] {}: AV1", t!("scrcpy.videoCodec"));
-                        VideoCodec::AV1
-                    }
-                    _ => {
+                let (codec_id, width, height) = match parse_video_metadata_buf(&buf, height_buf.as_ref()) {
+                    Ok(parsed) => parsed,
+                    Err(e) => {
                         log::error!(
-                            "[Controller] {}: 0x{:x}",
+                            "[Controller] {}: {}",
                             t!("scrcpy.invalidVideoCodec"),
-                            raw_codec_id
+                            e
                         );
                         return;
                     }
                 };
+
+                log::info!("[Controller] Video dimensions: {}x{}", width, height);
+                log::info!("[Controller] {}: {:?}", t!("scrcpy.videoCodec"), codec_id);
+
                 let video_decoder = match VideoDecoder::new(codec_id, width, height) {
                     Ok(d) => d,
                     Err(e) => {
@@ -542,3 +557,69 @@ impl ScrcpyConnection {
         self.socket.shutdown().await.unwrap();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_device_name() {
+        // Normal string
+        assert_eq!(parse_device_name(b"MyDevice"), "MyDevice");
+
+        // String with null bytes
+        assert_eq!(parse_device_name(b"MyDevice\0\0\0"), "MyDevice");
+
+        // String with null bytes in middle (will parse everything up to trailing nulls, char::from(0))
+        assert_eq!(parse_device_name(b"My\0Device\0"), "My\0Device");
+
+        // Invalid UTF-8
+        assert_eq!(parse_device_name(&[0, 159, 146, 150]), "INVALID_NAME");
+    }
+
+    #[test]
+    fn test_parse_video_metadata_buf() {
+        // 1. Test Old format (12 bytes)
+        // Codec H264 (0x68323634), width 1920 (0x00000780), height 1080 (0x00000438)
+        let mut buf_h264_old = [0u8; 12];
+        buf_h264_old[0..4].copy_from_slice(&SC_CODEC_ID_H264.to_be_bytes());
+        buf_h264_old[4..8].copy_from_slice(&1920u32.to_be_bytes());
+        buf_h264_old[8..12].copy_from_slice(&1080u32.to_be_bytes());
+
+        let res = parse_video_metadata_buf(&buf_h264_old, None).unwrap();
+        assert_eq!(res.0, VideoCodec::H264);
+        assert_eq!(res.1, 1920);
+        assert_eq!(res.2, 1080);
+
+        // Codec H265 (0x68323635), width 2560 (0x00000a00), height 1440 (0x000005a0)
+        let mut buf_h265_old = [0u8; 12];
+        buf_h265_old[0..4].copy_from_slice(&SC_CODEC_ID_H265.to_be_bytes());
+        buf_h265_old[4..8].copy_from_slice(&2560u32.to_be_bytes());
+        buf_h265_old[8..12].copy_from_slice(&1440u32.to_be_bytes());
+
+        let res = parse_video_metadata_buf(&buf_h265_old, None).unwrap();
+        assert_eq!(res.0, VideoCodec::H265);
+        assert_eq!(res.1, 2560);
+        assert_eq!(res.2, 1440);
+
+        // 2. Test new v3.0+ SessionMeta format (16 bytes)
+        // val2 has flags: e.g. 0x80000000
+        // val3 has width: 1920
+        // height_buf has height: 1080
+        let mut buf_h265_new = [0u8; 12];
+        buf_h265_new[0..4].copy_from_slice(&SC_CODEC_ID_H265.to_be_bytes());
+        buf_h265_new[4..8].copy_from_slice(&0x80000000u32.to_be_bytes());
+        buf_h265_new[8..12].copy_from_slice(&1920u32.to_be_bytes());
+        let height_buf = 1080u32.to_be_bytes();
+
+        let res = parse_video_metadata_buf(&buf_h265_new, Some(&height_buf)).unwrap();
+        assert_eq!(res.0, VideoCodec::H265);
+        assert_eq!(res.1, 1920);
+        assert_eq!(res.2, 1080);
+
+        // Height buffer missing error case
+        let res_err = parse_video_metadata_buf(&buf_h265_new, None);
+        assert!(res_err.is_err());
+    }
+}
+

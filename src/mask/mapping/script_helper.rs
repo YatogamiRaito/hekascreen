@@ -2050,3 +2050,117 @@ pub struct Program {
     pub stmts: Vec<Stmt>,
     pub errors: Vec<ScriptError>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::math::Vec2;
+    use tokio::sync::broadcast;
+
+    fn run_test_script(script: &str) -> Result<(), ScriptError> {
+        let ast = ScriptAST::new(script).map_err(|e| {
+            ScriptError::from_span(
+                SourceSpan { start_line: 1, start_col: 1, end_line: 1, end_col: 1 },
+                script,
+                e,
+            )
+        })?;
+        let (cs_tx, _) = broadcast::channel(16);
+        ast.eval_script(
+            &cs_tx,
+            Vec2::new(1080.0, 1920.0),
+            Vec2::new(540.0, 960.0),
+            Vec2::new(1080.0, 1920.0),
+        )
+    }
+
+    #[test]
+    fn test_script_variables() {
+        // Clear variables
+        {
+            let mut vars = SCRIPT_VARS.lock().unwrap();
+            vars.clear();
+        }
+
+        let script = r#"
+            let a = 10;
+            let b = 20;
+            set_var("result", a + b);
+        "#;
+        run_test_script(script).unwrap();
+
+        let val = {
+            let vars = SCRIPT_VARS.lock().unwrap();
+            vars.get("result").cloned()
+        };
+        assert!(val.is_some());
+        match val.unwrap() {
+            ScriptVar::Int(n) => assert_eq!(n, 30),
+            _ => panic!("Expected ScriptVar::Int"),
+        }
+    }
+
+    #[test]
+    fn test_script_loops_and_conditionals() {
+        {
+            let mut vars = SCRIPT_VARS.lock().unwrap();
+            vars.clear();
+        }
+
+        let script = r#"
+            let i = 0;
+            let sum = 0;
+            while i < 10 {
+                sum = sum + i;
+                i = i + 1;
+            };
+            set_var("sum", sum);
+        "#;
+        run_test_script(script).unwrap();
+
+        let val = {
+            let vars = SCRIPT_VARS.lock().unwrap();
+            vars.get("sum").cloned()
+        };
+        assert_eq!(match val.unwrap() { ScriptVar::Int(n) => n, _ => 0 }, 45);
+    }
+
+    #[test]
+    fn test_script_user_functions() {
+        {
+            let mut vars = SCRIPT_VARS.lock().unwrap();
+            vars.clear();
+        }
+
+        let script = r#"
+            fn calculate(x, y) {
+                return x * y + 5;
+            }
+            let res = calculate(3, 4);
+            set_var("res", res);
+        "#;
+        run_test_script(script).unwrap();
+
+        let val = {
+            let vars = SCRIPT_VARS.lock().unwrap();
+            vars.get("res").cloned()
+        };
+        assert_eq!(match val.unwrap() { ScriptVar::Int(n) => n, _ => 0 }, 17);
+    }
+
+    #[test]
+    fn test_script_recursion_depth_limit() {
+        // Recursive function call
+        let script = r#"
+            fn infinite_recursion(n) {
+                return infinite_recursion(n + 1);
+            }
+            infinite_recursion(0);
+        "#;
+        let res = run_test_script(script);
+        assert!(res.is_err());
+        let err_msg = res.unwrap_err().to_string();
+        assert!(err_msg.contains("Recursion depth limit exceeded"), "Error message: {}", err_msg);
+    }
+}
+

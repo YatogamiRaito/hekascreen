@@ -387,3 +387,46 @@ pub enum VideoMsg {
     ScriptClearError,
     Close,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ffmpeg_next::Packet;
+
+    #[test]
+    fn test_packet_merger() {
+        let mut merger = PacketMerger::new();
+
+        // 1. Create a config packet (no PTS)
+        let mut config_pkt = Packet::empty();
+        config_pkt.grow(5);
+        if let Some(data) = config_pkt.data_mut() {
+            data.copy_from_slice(&[1, 2, 3, 4, 5]);
+        }
+        config_pkt.set_pts(None);
+
+        // Feed to merger (should store config)
+        merger.merge(&mut config_pkt);
+        assert!(merger.config.is_some());
+        assert_eq!(merger.config.as_ref().unwrap(), &[1, 2, 3, 4, 5]);
+
+        // 2. Create a media packet (has PTS)
+        let mut media_pkt = Packet::empty();
+        media_pkt.grow(4);
+        if let Some(data) = media_pkt.data_mut() {
+            data.copy_from_slice(&[6, 7, 8, 9]);
+        }
+        media_pkt.set_pts(Some(100));
+
+        // Feed to merger (should merge)
+        merger.merge(&mut media_pkt);
+        
+        // Config should be cleared
+        assert!(merger.config.is_none());
+
+        // Merged packet should have config + media data
+        assert_eq!(media_pkt.size(), 9);
+        assert_eq!(media_pkt.data().unwrap(), &[1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    }
+}
+

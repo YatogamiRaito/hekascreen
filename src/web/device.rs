@@ -102,6 +102,23 @@ impl Drop for ConnectingGuard {
     }
 }
 
+pub fn parse_and_sort_server_version(file_names: &[String]) -> Option<String> {
+    file_names
+        .iter()
+        .filter_map(|file_name| {
+            let v_str = file_name.strip_prefix("scrcpy-mask-server-v")?.to_string();
+            let normalized = if v_str.split('.').count() == 2 {
+                format!("{}.0", v_str)
+            } else {
+                v_str.clone()
+            };
+            let parsed = semver::Version::parse(&normalized).ok()?;
+            Some((parsed, v_str))
+        })
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, original)| original)
+}
+
 #[derive(Deserialize)]
 struct PostDataControlDevice {
     device_id: String,
@@ -153,26 +170,16 @@ async fn _control_device(
 
     // prepare for scrcpy app
     let scid = gen_scid();
-    let version = std::fs::read_dir(relate_to_root_path(["assets"]))
+    let file_names: Vec<String> = std::fs::read_dir(relate_to_root_path(["assets"]))
         .ok()
-        .and_then(|read_dir| {
+        .map(|read_dir| {
             read_dir
                 .filter_map(|entry| entry.ok())
-                .filter_map(|entry| {
-                    let file_name = entry.file_name().into_string().ok()?;
-                    let v_str = file_name.strip_prefix("scrcpy-mask-server-v")?.to_string();
-                    let normalized = if v_str.split('.').count() == 2 {
-                        format!("{}.0", v_str)
-                    } else {
-                        v_str.clone()
-                    };
-                    let parsed = semver::Version::parse(&normalized).ok()?;
-                    Some((parsed, v_str))
-                })
-                .max_by(|a, b| a.0.cmp(&b.0))
-                .map(|(_, original)| original)
+                .filter_map(|entry| entry.file_name().into_string().ok())
+                .collect()
         })
-        .unwrap_or_else(|| "4.0".to_string());
+        .unwrap_or_default();
+    let version = parse_and_sort_server_version(&file_names).unwrap_or_else(|| "4.0".to_string());
     let scrcpy_path = relate_to_root_path(["assets", &format!("scrcpy-mask-server-v{}", version)]);
     Device::push(
         &device_id,
@@ -664,3 +671,38 @@ async fn eval_script(
         ))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_and_sort_server_version() {
+        // Test empty list
+        assert_eq!(parse_and_sort_server_version(&[]), None);
+
+        // Test normal sorting
+        let files = vec![
+            "scrcpy-mask-server-v2.4".to_string(),
+            "scrcpy-mask-server-v4.0".to_string(),
+            "scrcpy-mask-server-v3.2".to_string(),
+        ];
+        assert_eq!(parse_and_sort_server_version(&files), Some("4.0".to_string()));
+
+        // Test 2-digit vs 3-digit normalization sorting
+        let files2 = vec![
+            "scrcpy-mask-server-v2.4".to_string(),
+            "scrcpy-mask-server-v10.0".to_string(), // 10.0 > 2.4 (string-wise 10.0 would be smaller than 2.4, but semver-wise it's larger)
+        ];
+        assert_eq!(parse_and_sort_server_version(&files2), Some("10.0".to_string()));
+
+        // Test with invalid file names (should be skipped)
+        let files3 = vec![
+            "scrcpy-mask-server-v2.4".to_string(),
+            "invalid-file-name".to_string(),
+            "scrcpy-mask-server-v1.0".to_string(),
+        ];
+        assert_eq!(parse_and_sort_server_version(&files3), Some("2.4".to_string()));
+    }
+}
+
