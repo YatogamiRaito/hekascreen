@@ -108,7 +108,7 @@ fn redraw_normal_mapping_label(
 fn update_labels(
     mask_size: Res<MaskSize>,
     opacity: Res<LabelOpacity>,
-    window: Single<&Window>,
+    window: Option<Single<&Window>>,
     mut query: Query<(
         &Label,
         &mut BackgroundColor,
@@ -120,6 +120,8 @@ fn update_labels(
     mut child_query: Query<&Children>,
     mut redraw_mapping_label: ResMut<RedrawMappingLabel>,
 ) {
+    // On Linux the window is spawned on device connect; skip label updates until it exists.
+    let Some(window) = window else { return; };
     let mut updated_flag = false;
 
     for (label, mut bg, mut node, cp_node, node_children) in query.iter_mut() {

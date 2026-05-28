@@ -69,6 +69,44 @@ fn main() {
 
     ffmpeg_next::init().unwrap();
 
+    // On Linux (Wayland + X11) winit's set_visible() is a no-op on Wayland, so we
+    // cannot hide the primary window after creation. Instead we start with NO window
+    // and spawn/despawn it on demand (device connect / disconnect) inside
+    // handle_mask_command. On other platforms we keep the old visible:false approach.
+    #[cfg(target_os = "linux")]
+    let window_plugin = WindowPlugin {
+        primary_window: None,
+        exit_condition: bevy::window::ExitCondition::DontExit,
+        ..default()
+    };
+    #[cfg(not(target_os = "linux"))]
+    let window_plugin = WindowPlugin {
+        primary_window: Some(Window {
+            has_shadow: false,
+            transparent: true, // for windows: https://github.com/bevyengine/bevy/issues/7544
+            decorations: false,
+            present_mode: match local_config.present_mode.as_str() {
+                "AutoNoVsync" => PresentMode::AutoNoVsync,
+                "Immediate" => PresentMode::Immediate,
+                "Mailbox" => PresentMode::Mailbox,
+                _ => PresentMode::AutoVsync,
+            },
+            resizable: true,
+            visible: false,
+            focused: false,
+            window_level: if local_config.always_on_top {
+                WindowLevel::AlwaysOnTop
+            } else {
+                WindowLevel::Normal
+            },
+            #[cfg(target_os = "macos")]
+            composite_alpha_mode: bevy::window::CompositeAlphaMode::PostMultiplied,
+            name: Some("scrcpy-mask".to_string()),
+            ..default()
+        }),
+        ..default()
+    };
+
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -76,39 +114,7 @@ fn main() {
                 custom_layer: log_custom_layer,
                 ..default()
             })
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    has_shadow: false,
-                    transparent: true, // for windows: https://github.com/bevyengine/bevy/issues/7544
-                    decorations: false,
-                    present_mode: match local_config.present_mode.as_str() {
-                        "AutoNoVsync" => PresentMode::AutoNoVsync,
-                        "Immediate" => PresentMode::Immediate,
-                        "Mailbox" => PresentMode::Mailbox,
-                        _ => PresentMode::AutoVsync,
-                    },
-                    resizable: true,
-                    visible: false,
-                    // Prevent a spurious Window-Changed event: Window::default() has
-                    // focused:true, but an invisible window can never actually be
-                    // focused. Setting false here keeps the Bevy cache in sync so
-                    // changed_windows never fires a focus-related winit call at startup.
-                    focused: false,
-                    window_level: if local_config.always_on_top {
-                        WindowLevel::AlwaysOnTop
-                    } else {
-                        WindowLevel::Normal
-                    },
-                    #[cfg(target_os = "macos")]
-                    composite_alpha_mode: bevy::window::CompositeAlphaMode::PostMultiplied,
-                    #[cfg(target_os = "linux")]
-                    composite_alpha_mode: bevy::window::CompositeAlphaMode::PreMultiplied,
-                    ..default()
-                }),
-                #[cfg(target_os = "linux")]
-                exit_condition: bevy::window::ExitCondition::DontExit,
-                ..default()
-            }),
+            .set(window_plugin),
     )
     .add_plugins(bevy_tokio_tasks::TokioTasksPlugin::default())
     .add_plugins(MaskPlugins)

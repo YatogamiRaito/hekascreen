@@ -28,6 +28,9 @@ impl Plugin for MaskPlugins {
     }
 }
 
-fn init_mask_size(mut commands: Commands, window: Single<&Window>) {
-    commands.insert_resource(MaskSize(window.size()));
+fn init_mask_size(mut commands: Commands) {
+    // On Linux the primary window is not created at startup (it is spawned on device
+    // connect), so we cannot read its size here. Use a safe default; the real size is
+    // set by MaskCommand::WinMove once a device connects.
+    commands.insert_resource(MaskSize(Vec2::new(800., 600.)));
 }

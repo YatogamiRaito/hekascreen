@@ -61,9 +61,11 @@ pub struct ActiveCursorFpsConfig {
 
 fn handle_cursor_normal(
     accumulated_motion: Res<AccumulatedMouseMotion>,
-    window: Single<&Window>,
+    window: Option<Single<&Window>>,
     mut cursor_pos: ResMut<CursorPosition>,
 ) {
+    // On Linux the window may not exist yet (spawned on device connect).
+    let Some(window) = window else { return; };
     let mut new_pos = cursor_pos.0;
     if let Some(pos) = window.cursor_position() {
         new_pos = pos;
@@ -76,13 +78,14 @@ fn handle_cursor_normal(
 }
 
 fn on_enter_cursor_fps(
-    mut window: Single<&mut Window>,
-    mut cursor_opts: Single<&mut CursorOptions>,
+    window: Option<Single<&mut Window>>,
+    cursor_opts: Option<Single<&mut CursorOptions>>,
     mut cursor_pos: ResMut<CursorPosition>,
     mut ignore_first_motion: ResMut<IgnoreFirstMotion>,
     fps_config: Res<ActiveCursorFpsConfig>,
     mask_size: Res<MaskSize>,
 ) {
+    let (Some(mut window), Some(mut cursor_opts)) = (window, cursor_opts) else { return; };
     let center_pos = fps_config.original_pos / fps_config.original_size * mask_size.0;
 
     cursor_opts.grab_mode = CursorGrabMode::Locked;
@@ -97,12 +100,13 @@ fn on_enter_cursor_fps(
 }
 
 fn on_exit_cursor_fps(
-    mut window: Single<&mut Window>,
-    mut cursor_opts: Single<&mut CursorOptions>,
+    window: Option<Single<&mut Window>>,
+    cursor_opts: Option<Single<&mut CursorOptions>>,
     mut cursor_pos: ResMut<CursorPosition>,
     fps_config: Res<ActiveCursorFpsConfig>,
     mask_size: Res<MaskSize>,
 ) {
+    let (Some(mut window), Some(mut cursor_opts)) = (window, cursor_opts) else { return; };
     let center_pos = fps_config.original_pos / fps_config.original_size * mask_size.0;
 
     window.set_cursor_position(Some(center_pos));
@@ -117,10 +121,12 @@ struct IgnoreFirstMotion(bool);
 pub const FPS_MARGIN: f32 = 25.;
 
 fn run_if_handle_cursor_fps(
-    window: Single<&Window>,
+    window: Option<Single<&Window>>,
     fps_config: Res<ActiveCursorFpsConfig>,
 ) -> bool {
-    // fire key is not pressed and window is focused
+    // fire key is not pressed and window is focused.
+    // On Linux the window may not exist; return false in that case.
+    let Some(window) = window else { return false; };
     !fps_config.ignore_fps_motion && window.focused
 }
 

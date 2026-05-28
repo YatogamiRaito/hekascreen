@@ -1,7 +1,8 @@
-use bevy::{prelude::*, window::{WindowLevel, PrimaryWindow}};
+use bevy::{prelude::*, window::{WindowLevel, PrimaryWindow, PresentMode, CompositeAlphaMode}};
 use rust_i18n::t;
 
 use crate::{
+    config::LocalConfig,
     mask::mapping::{
         MappingState,
         config::{
@@ -72,6 +73,11 @@ pub fn handle_mask_command(
     mut mask_size: ResMut<MaskSize>,
     mut pending_resize: Local<Option<PendingResize>>,
     runtime: ResMut<TokioTasksRuntime>,
+    // Linux: track whether a device is currently connected so that stale WinMove
+    // commands arriving after disconnect do not re-spawn the window.
+    mut device_connected: Local<bool>,
+    // Linux: entity of the spawned mask window (None when no device is connected).
+    mut mask_window_entity: Local<Option<Entity>>,
 ) {
     if let Some(ref mut pending) = *pending_resize {
         if let Ok((_, mut window)) = window_query.single_mut() {
@@ -123,30 +129,45 @@ pub fn handle_mask_command(
 
                 #[cfg(target_os = "linux")]
                 {
-                    // NOTE: Previously this used despawn+spawn to work around a supposed X11
-                    // positioning bug. However that approach leaves a window-less gap where
-                    // Bevy's winit loop goes to sleep (no events → no frames), so the deferred
-                    // spawn command can take seconds to execute. Simply resizing+repositioning
-                    // the existing window is both correct and avoids the gap entirely.
-                    if let Ok((_, mut window)) = window_query.single_mut() {
+                    // Discard stale WinMove messages that arrive after device disconnect.
+                    if !*device_connected {
+                        let _ = oneshot_tx.send(Ok(String::new()));
+                    } else if let Ok((_, mut window)) = window_query.single_mut() {
+                        // Window already exists (spawned in DeviceConnectionChange) — update it.
                         window.resolution.set(width, height);
                         window.position.set((left, top).into());
+                        // On X11 this actually shows the window (we start with visible:false).
+                        // On Wayland set_visible is a no-op but the window is already visible.
                         window.visible = true;
+
+                        mask_size.0 = window.resolution.size();
+
+                        let msg = t!(
+                            "mask.windowMovedAndResized",
+                            left => left,
+                            top => top,
+                            width => mask_size.0.x,
+                            height => mask_size.0.y
+                        )
+                        .to_string();
+
+                        log::info!("[Mask] {}", msg);
+                        let _ = oneshot_tx.send(Ok(msg));
+                    } else {
+                        // Window entity was spawned this frame but commands haven't been flushed
+                        // yet (deferred). This should be rare; just report size.
+                        mask_size.0 = Vec2::new(width, height);
+                        let msg = t!(
+                            "mask.windowMovedAndResized",
+                            left => left,
+                            top => top,
+                            width => width,
+                            height => height
+                        )
+                        .to_string();
+                        log::info!("[Mask] {}", msg);
+                        let _ = oneshot_tx.send(Ok(msg));
                     }
-
-                    mask_size.0 = Vec2::new(width, height);
-
-                    let msg = t!(
-                        "mask.windowMovedAndResized",
-                        left => left,
-                        top => top,
-                        width => mask_size.0.x,
-                        height => mask_size.0.y
-                    )
-                    .to_string();
-
-                    log::info!("[Mask] {}", msg);
-                    let _ = oneshot_tx.send(Ok(msg));
                 }
 
                 #[cfg(not(target_os = "linux"))]
@@ -204,17 +225,67 @@ pub fn handle_mask_command(
                 let msg = if connect {
                     next_mapping_state.set(MappingState::Normal);
                     log::info!("[Mapping] {}", t!("mask.enterNormalMappingMode"));
+
+                    #[cfg(target_os = "linux")]
+                    {
+                        *device_connected = true;
+                        let config = LocalConfig::get();
+                        let present_mode = match config.present_mode.as_str() {
+                            "AutoNoVsync" => PresentMode::AutoNoVsync,
+                            "Immediate" => PresentMode::Immediate,
+                            "Mailbox" => PresentMode::Mailbox,
+                            _ => PresentMode::AutoVsync,
+                        };
+                        let window_level = if config.always_on_top {
+                            WindowLevel::AlwaysOnTop
+                        } else {
+                            WindowLevel::Normal
+                        };
+                        let entity = commands.spawn((
+                            Window {
+                                name: Some("scrcpy-mask".to_string()),
+                                has_shadow: false,
+                                transparent: true,
+                                decorations: false,
+                                present_mode,
+                                resizable: true,
+                                // X11: starts hidden, made visible on first WinMove.
+                                // Wayland: set_visible is a no-op; the window appears immediately.
+                                visible: false,
+                                focused: false,
+                                window_level,
+                                composite_alpha_mode: CompositeAlphaMode::PreMultiplied,
+                                ..default()
+                            },
+                            PrimaryWindow,
+                        )).id();
+                        *mask_window_entity = Some(entity);
+                    }
+
+                    #[cfg(not(target_os = "linux"))]
                     if let Ok((_, mut window)) = window_query.single_mut() {
                         window.visible = true;
                     }
+
                     t!("mask.mainDeviceConnected").to_string()
                 } else {
                     next_cursor_state.set(CursorState::Normal);
                     next_mapping_state.set(MappingState::Stop);
                     log::info!("[Mapping] {}", t!("mask.exitStopMappingMode"));
+
+                    #[cfg(target_os = "linux")]
+                    {
+                        *device_connected = false;
+                        if let Some(entity) = mask_window_entity.take() {
+                            commands.entity(entity).despawn();
+                        }
+                    }
+
+                    #[cfg(not(target_os = "linux"))]
                     if let Ok((_, mut window)) = window_query.single_mut() {
                         window.visible = false;
                     }
+
                     t!("mask.mainDeviceDisconnected").to_string()
                 };
                 log::info!("[Mask] {}", msg);
