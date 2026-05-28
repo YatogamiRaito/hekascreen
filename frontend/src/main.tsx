@@ -2,19 +2,20 @@ import { createRoot } from "react-dom/client";
 import "virtual:uno.css";
 import "./index.css";
 import router from "./router";
-import "@ant-design/v5-patch-for-react-19";
 import { Provider } from "react-redux";
-import { store } from "./store/store.ts";
+import { store, useAppSelector } from "./store/store.ts";
 import { ConfigProvider, theme } from "antd";
 import "./i18n";
 import { RouterProvider } from "react-router-dom";
 
-createRoot(document.getElementById("root")!).render(
-  <Provider store={store}>
+function AppWrapper() {
+  const localConfigTheme = useAppSelector((state) => state.localConfig.theme);
+
+  return (
     <ConfigProvider
       theme={{
-        algorithm: theme.darkAlgorithm,
-        cssVar: true,
+        algorithm: localConfigTheme === "light" ? theme.defaultAlgorithm : theme.darkAlgorithm,
+        cssVar: { prefix: "ant" },
         hashed: false,
         token: {
           colorPrimary: "#b72a20",
@@ -23,11 +24,17 @@ createRoot(document.getElementById("root")!).render(
           colorSuccess: "#52c41a",
           colorError: "#de7c7d",
           colorWarning: "#c1840c",
-          colorBgBase: "#060606",
+          colorBgBase: localConfigTheme === "light" ? "#ffffff" : "#060606",
         },
       }}
     >
       <RouterProvider router={router} />
     </ConfigProvider>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(
+  <Provider store={store}>
+    <AppWrapper />
   </Provider>
 );

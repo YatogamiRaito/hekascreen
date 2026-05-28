@@ -276,6 +276,11 @@
       "advance": "Advance"
     },
     "language": "Language",
+    "theme": "Theme",
+    "themeOptions": {
+      "dark": "Dark Theme",
+      "light": "Light Theme"
+    },
     "webPort": "Web port",
     "controllerPort": "Controller port",
     "adbPath": "Adb path",

@@ -160,6 +160,7 @@ function Setting({
               className="w-full"
               value={config.duration}
               min={0}
+              suffix="ms"
               onChange={(v) =>
                 v !== null && onConfigChange({ ...config, duration: v })
               }

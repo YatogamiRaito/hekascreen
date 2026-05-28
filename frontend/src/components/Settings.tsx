@@ -41,6 +41,7 @@ import {
   setVideoIntraRefresh,
   setShowDiagnostics,
   setHwDecode,
+  setTheme,
 } from "../store/localConfig";
 import {
   setIsLoading,
@@ -155,6 +156,17 @@ export default function Settings() {
               value={localConfig.language}
               options={languageOptions}
               onChange={(v) => dispatch(setLanguage(v))}
+            />
+          </ItemBox>
+          <ItemBox label={t("settings.theme")}>
+            <Select
+              className="w-sm"
+              value={localConfig.theme}
+              options={[
+                { label: t("settings.themeOptions.dark"), value: "dark" },
+                { label: t("settings.themeOptions.light"), value: "light" },
+              ]}
+              onChange={(v) => dispatch(setTheme(v))}
             />
           </ItemBox>
           <ItemBox label={t("settings.adbPath")}>

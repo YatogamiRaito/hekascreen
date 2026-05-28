@@ -51,6 +51,7 @@ pub struct LocalConfig {
     pub show_diagnostics: bool,
     pub config_version: u32,
     pub hw_decode: bool,
+    pub theme: String,
 }
 
 fn get_system_language() -> String {
@@ -94,8 +95,9 @@ impl Default for LocalConfig {
             video_qcom_low_latency: false, // causes stack corruption on Android 16 (OMX.qcom.video.encoder.hevc)
             video_intra_refresh: false,
             show_diagnostics: true,
-            config_version: 1,
+            config_version: 2,
             hw_decode: false,
+            theme: "dark".to_string(),
         }
     }
 }
@@ -222,6 +224,11 @@ impl LocalConfig {
             migrated = true;
             eprintln!("[HekaScreen] Config validation: invalid present_mode, reset to Mailbox");
         }
+        if !matches!(config.theme.as_str(), "dark" | "light") {
+            config.theme = "dark".to_string();
+            migrated = true;
+            eprintln!("[HekaScreen] Config validation: invalid theme, reset to dark");
+        }
 
         *CONFIG.write().unwrap_or_else(|e| e.into_inner()) = config;
 
@@ -269,5 +276,6 @@ impl LocalConfig {
         (show_diagnostics, bool),
         (config_version, u32),
         (hw_decode, bool),
+        (theme, String),
     );
 }

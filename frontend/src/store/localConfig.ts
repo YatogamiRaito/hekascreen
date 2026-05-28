@@ -63,6 +63,7 @@ export interface LocalConfigState {
   showDiagnostics: boolean;
   videoIFrameInterval: number;
   hwDecode: boolean;
+  theme: string;
 }
 
 const initialState: LocalConfigState = {
@@ -91,6 +92,7 @@ const initialState: LocalConfigState = {
   showDiagnostics: true,
   videoIFrameInterval: 10,
   hwDecode: false,
+  theme: "dark",
 };
 
 const localConfigSlice = createSlice({
@@ -206,6 +208,10 @@ const localConfigSlice = createSlice({
       state.hwDecode = action.payload;
       updateLocalConfig("hw_decode", action.payload);
     },
+    setTheme: (state, action: PayloadAction<string>) => {
+      state.theme = action.payload;
+      updateLocalConfig("theme", action.payload);
+    },
   },
 });
 
@@ -236,6 +242,7 @@ export const {
   setShowDiagnostics,
   setVideoIFrameInterval,
   setHwDecode,
+  setTheme,
 } = localConfigSlice.actions;
 
 export default localConfigSlice.reducer;

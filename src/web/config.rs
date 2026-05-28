@@ -90,6 +90,25 @@ async fn update_config(
 ) -> Result<JsonResponse, WebServerError> {
     // sync with src/config.rs
     match payload.key.as_str() {
+        "theme" => {
+            if let Some(value) = payload.value.as_str() {
+                if !matches!(value, "dark" | "light") {
+                    return Err(WebServerError::bad_request(format!(
+                        "Invalid theme: {}",
+                        value
+                    )));
+                }
+                LocalConfig::set_theme(value.to_string());
+                return Ok(JsonResponse::success(
+                    format!("Theme set to: {}", value),
+                    None,
+                ));
+            } else {
+                return Err(WebServerError::bad_request(
+                    "Theme must be a string".to_string(),
+                ));
+            }
+        }
         "language" => {
             if let Some(value) = payload.value.as_str() {
                 if !matches!(value, "zh-CN" | "en-US" | "tr-TR") {

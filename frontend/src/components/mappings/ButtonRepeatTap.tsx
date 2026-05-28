@@ -151,6 +151,7 @@ function Setting({
             className="w-full"
             value={config.duration}
             min={0}
+            suffix="ms"
             onChange={(v) =>
               v !== null && onConfigChange({ ...config, duration: v })
             }
@@ -161,6 +162,7 @@ function Setting({
             className="w-full"
             value={config.interval}
             min={0}
+            suffix="ms"
             onChange={(v) =>
               v !== null && onConfigChange({ ...config, interval: v })
             }

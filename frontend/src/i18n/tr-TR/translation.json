@@ -276,6 +276,11 @@
       "advance": "Gelişmiş"
     },
     "language": "Dil",
+    "theme": "Tema",
+    "themeOptions": {
+      "dark": "Koyu Tema",
+      "light": "Açık Tema"
+    },
     "webPort": "Web portu",
     "controllerPort": "Denetleyici portu",
     "adbPath": "Adb yolu",

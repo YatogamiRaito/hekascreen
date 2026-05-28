@@ -237,6 +237,7 @@ function PositonEditorItem({
               className="w-full"
               value={item.wait}
               min={0}
+              suffix="ms"
               onChange={(v) =>
                 v !== null && onItemChange(index, { ...item, wait: v })
               }
@@ -247,6 +248,7 @@ function PositonEditorItem({
               className="w-full"
               value={item.duration}
               min={0}
+              suffix="ms"
               onChange={(v) =>
                 v !== null && onItemChange(index, { ...item, duration: v })
               }

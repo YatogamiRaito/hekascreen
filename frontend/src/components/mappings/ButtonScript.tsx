@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { MappingUpdater, ScriptConfig } from "./mapping";
-import { Flex, Input, InputNumber, Modal, Tooltip, Typography } from "antd";
+import { Flex, Input, InputNumber, Modal, Tooltip, Typography, Mentions } from "antd";
 import {
   mappingButtonDragFactory,
   mappingButtonPresetStyle,
@@ -23,6 +23,27 @@ import { requestPost } from "../../utils";
 import { IconFont, useMessageContext } from "../../hooks";
 
 const PRESET_STYLE = mappingButtonPresetStyle(52);
+
+const SCRIPT_AUTOCOMPLETE_OPTIONS = [
+  { value: "tap(0, 500, 500, \"default\")", label: "tap(pointer_id, x, y, action)" },
+  { value: "swipe(0, 20, 100, 100, 500, 500)", label: "swipe(pointer_id, interval, x1, y1, x2, y2)" },
+  { value: "sleep(100)", label: "sleep(ms)" },
+  { value: "wait(100)", label: "wait(ms)" },
+  { value: "toggle(1)", label: "toggle(id)" },
+  { value: "set_toggle(1, true)", label: "set_toggle(id, value)" },
+  { value: "get_toggle(1)", label: "get_toggle(id)" },
+  { value: "set_var(\"name\", 1)", label: "set_var(name, value)" },
+  { value: "get_var(\"name\")", label: "get_var(name)" },
+  { value: "has_var(\"name\")", label: "has_var(name)" },
+  { value: "del_var(\"name\")", label: "del_var(name)" },
+  { value: "send_key(\"KEYCODE_BACK\")", label: "send_key(key_name)" },
+  { value: "paste_text(\"text\")", label: "paste_text(text)" },
+  { value: "print(\"hello\")", label: "print(...)" },
+  { value: "ORIGINAL_W", label: "ORIGINAL_W" },
+  { value: "ORIGINAL_H", label: "ORIGINAL_H" },
+  { value: "CURSOR_X", label: "CURSOR_X" },
+  { value: "CURSOR_Y", label: "CURSOR_Y" },
+];
 
 export default function ButtonScript({
   index,
@@ -183,6 +204,7 @@ function Setting({
             className="w-full"
             value={config.interval}
             min={0}
+            suffix="ms"
             onChange={(v) =>
               v !== null && onConfigChange({ ...config, interval: v })
             }
@@ -200,15 +222,17 @@ function Setting({
             </Flex>
           }
         >
-          <Input.TextArea
+          <Mentions
             className="w-full font-mono"
             value={config.pressed_script}
             placeholder={t(
               "mappings.script.setting.pressed_script_placeholder",
             )}
-            autoSize={{ minRows: 1, maxRows: 10 }}
-            onChange={(e) =>
-              onConfigChange({ ...config, pressed_script: e.target.value })
+            autoSize={{ minRows: 2, maxRows: 10 }}
+            prefix=""
+            options={SCRIPT_AUTOCOMPLETE_OPTIONS}
+            onChange={(v) =>
+              onConfigChange({ ...config, pressed_script: v })
             }
           />
         </ItemBox>
@@ -224,13 +248,15 @@ function Setting({
             </Flex>
           }
         >
-          <Input.TextArea
+          <Mentions
             className="w-full font-mono"
             value={config.held_script}
             placeholder={t("mappings.script.setting.held_script_placeholder")}
-            autoSize={{ minRows: 1, maxRows: 10 }}
-            onChange={(e) =>
-              onConfigChange({ ...config, held_script: e.target.value })
+            autoSize={{ minRows: 2, maxRows: 10 }}
+            prefix=""
+            options={SCRIPT_AUTOCOMPLETE_OPTIONS}
+            onChange={(v) =>
+              onConfigChange({ ...config, held_script: v })
             }
           />
         </ItemBox>
@@ -246,15 +272,17 @@ function Setting({
             </Flex>
           }
         >
-          <Input.TextArea
+          <Mentions
             className="w-full font-mono"
             value={config.released_script}
             placeholder={t(
               "mappings.script.setting.released_script_placeholder",
             )}
-            autoSize={{ minRows: 1, maxRows: 10 }}
-            onChange={(e) =>
-              onConfigChange({ ...config, released_script: e.target.value })
+            autoSize={{ minRows: 2, maxRows: 10 }}
+            prefix=""
+            options={SCRIPT_AUTOCOMPLETE_OPTIONS}
+            onChange={(v) =>
+              onConfigChange({ ...config, released_script: v })
             }
           />
         </ItemBox>

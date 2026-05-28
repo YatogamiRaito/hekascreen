@@ -276,6 +276,11 @@
       "advance": "高级"
     },
     "language": "语言",
+    "theme": "主题",
+    "themeOptions": {
+      "dark": "深色主题",
+      "light": "浅色主题"
+    },
     "webPort": "Web 端口",
     "controllerPort": "控制服务端口",
     "adbPath": "Adb 路径",
